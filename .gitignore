@@ -1,0 +1,42 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+*.log
+npm-debug.log*
+
+# Data (raw INPI files are huge, never commit)
+data/raw/
+data/extracted/
+data/processed/
+!data/README.md
+
+# Reports
+reports/*.json
+reports/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime / build artifacts
+*.pid
+backend/backend.pid
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
