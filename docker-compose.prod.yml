@@ -1,0 +1,78 @@
+# =============================================================================
+# IntelliINPI - Production stack (Oracle Cloud Free Tier VM)
+#
+# Runs ONLY the FastAPI backend. The PostgreSQL instance is the one already
+# running on the host VM (no database container here), and the Next.js
+# frontend is deployed separately on Vercel.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f api
+#
+# Secrets are NOT stored in this file: every value comes from ./backend/.env
+# (created on the server, never committed). See docs/DEPLOY_ORACLE_VERCEL.md.
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      additional_contexts:
+        # ingestion/ directory, so the Dockerfile can read its requirements.txt
+        # (Docker cannot COPY files outside the primary build context).
+        ingestion_reqs: ./ingestion
+    image: intelliinpi-api:latest
+    container_name: intelliinpi_api
+    restart: unless-stopped
+
+    # All configuration/secrets come from the server-only .env file.
+    env_file:
+      - ./backend/.env
+
+    ports:
+      # Bind on all interfaces so the Vercel frontend can reach the API over
+      # HTTPS (put a reverse proxy / Caddy in front — see the runbook).
+      - "8000:8000"
+
+    volumes:
+      # Persistent private document storage (NIT uploads). Must survive
+      # container recreation; DOCUMENT_STORAGE_DIR in .env points here.
+      - api_documents:/app/var/documents
+      # Ingested INPI datasets live under DATA_DIR (mounted read-write so the
+      # ingestion pipeline can populate them).
+      - api_data:/app/data
+
+    # Talk to the PostgreSQL running natively on the VM host.
+    # network_mode: host would be simpler but loses the named volumes, so we
+    # map the host through extra_hosts instead (works on Linux/Docker 20.10+).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    # Migrations + seed run once before the server starts, then uvicorn keeps
+    # the long-lived process (connection pool) alive — the whole reason this
+    # backend cannot be serverless.
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  api_documents:
+  api_data:

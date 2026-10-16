@@ -18,6 +18,7 @@ Dados Abertos do INPI (https://dadosabertos.inpi.gov.br/).
 - [Acesso ao sistema](#acesso-ao-sistema)
 - [Docker](#docker)
 - [Deploy (Vercel) e variáveis de ambiente](#deploy-vercel-e-variáveis-de-ambiente)
+- [Deploy da API (Oracle Cloud)](#deploy-da-api-oracle-cloud)
 - [Estrutura do projeto](#estrutura-do-projeto)
 
 ## Arquitetura
@@ -311,13 +312,7 @@ Configure as variáveis em **Project → Settings → Environment Variables**
 > segredos JWT forem iguais, ou se um deles tiver menos de 32 caracteres
 > (validação em `backend/app/config.py`).
 
-> **Atenção (arquitetura):** a Vercel hospeda o **frontend Next.js**. O
-> **backend FastAPI** é um processo persistente de longa duração (connection
-> pool do PostgreSQL, `uvicorn`) e **não roda** na Vercel. Para publicar o
-> frontend na Vercel, hospede a API em um serviço que suporte processos
-> persistentes (VM, container, Render, Railway, Fly.io, etc.) e aponte
-> `NEXT_PUBLIC_API_BASE_URL` para ela. Os segredos `DATABASE_URL` e
-> `DEEPSEEK_API_KEY` pertencem ao serviço que roda o backend.
+> **Atenção (arquitetura):** a Vercel hospeda apenas o **frontend Next.js**. O backend FastAPI é um processo persistente (connection pool do PostgreSQL, uvicorn) e **não roda** na Vercel. Hospede a API numa VM/container. O passo a passo completo (Oracle Cloud Always Free + Vercel) está em `docs/DEPLOY_ORACLE_VERCEL.md`.
 
 ## Estrutura do projeto
 
