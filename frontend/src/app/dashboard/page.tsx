@@ -1,85 +1,113 @@
-"use client";
+﻿"use client";
+
+/**
+ * Visão Geral — the business dashboard.
+ *
+ * Rewritten so the numbers describe **this tenant's operation**, not the global
+ * INPI base. Every value comes from ``GET /api/dashboard/business``:
+ * commercial counters, the funnel, the proposals that need action, deadlines
+ * (commercial and PI, clearly separated) and the real activity timeline.
+ *
+ * Where a comparison cannot be computed from real history it is *omitted* —
+ * never invented.
+ */
 
 import Link from "next/link";
+import { useState } from "react";
 
 import AppShell from "@/components/AppShell";
-import { DonutChart, LineChart } from "@/components/charts";
+import { LineChart } from "@/components/charts";
+import Funnel from "@/components/Funnel";
+import PageHeader from "@/components/PageHeader";
+import StatCard from "@/components/StatCard";
 import {
   Badge,
+  Button,
   Card,
   CardBody,
   CardHeader,
   ErrorNote,
   Spinner,
+  statusTone,
 } from "@/components/ui";
-import { useDashboard } from "@/lib/hooks";
+import { useBusinessDashboard } from "@/lib/hooks";
+import { PENDING_REASON_LABELS } from "@/lib/types";
 
-type Tone = "brand" | "green" | "amber" | "red" | "slate";
-
-const STAT_STYLES: Record<Tone, { bg: string; text: string }> = {
-  brand: { bg: "bg-brand-50", text: "text-brand-700" },
-  green: { bg: "bg-emerald-50", text: "text-emerald-600" },
-  amber: { bg: "bg-amber-50", text: "text-amber-600" },
-  red: { bg: "bg-red-50", text: "text-red-600" },
-  slate: { bg: "bg-slate-100", text: "text-slate-700" },
-};
-
-function StatCard({
-  label,
-  value,
-  tone = "brand",
-  icon,
-}: {
-  label: string;
-  value: number | string;
-  tone?: Tone;
-  icon: string;
-}) {
-  const s = STAT_STYLES[tone];
-  return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-slate-500">{label}</p>
-          <p className={`mt-1 text-3xl font-bold ${s.text}`}>
-            {typeof value === "number" ? value.toLocaleString("pt-BR") : value}
-          </p>
-        </div>
-        <span
-          className={`flex h-11 w-11 items-center justify-center rounded-xl text-xl ${s.bg}`}
-        >
-          {icon}
-        </span>
-      </div>
-    </Card>
-  );
+function currency(value: string | null): string {
+  if (!value) return "—";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return "—";
+  return numeric.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export default function DashboardPage() {
-  const { data, isLoading, error } = useDashboard();
+const ACTIVITY_ICONS: Record<string, string> = {
+  customer: "👥",
+  proposal: "📄",
+  opportunity: "🎯",
+  activity: "📞",
+  monitoring: "🛰",
+  alert: "⚠",
+};
 
-  const evolution = data?.portfolio_evolution ?? [];
-  const lines = [
-    { name: "Marcas", color: "#2563eb", values: evolution.map((e) => e.marcas) },
-    { name: "Patentes", color: "#f59e0b", values: evolution.map((e) => e.patentes) },
+export default function DashboardPage() {
+  const [months, setMonths] = useState(12);
+  const { data, isLoading, error } = useBusinessDashboard(months);
+
+  const evolution = data?.evolution ?? [];
+  const chartLabels = evolution.map((e) => e.label.slice(5)); // MM
+  const series = [
+    {
+      name: "Novos clientes",
+      color: "#2563eb",
+      values: evolution.map((e) => e.new_customers),
+    },
+    {
+      name: "Propostas enviadas",
+      color: "#f59e0b",
+      values: evolution.map((e) => e.proposals_sent),
+    },
+    {
+      name: "Propostas aprovadas",
+      color: "#10b981",
+      values: evolution.map((e) => e.proposals_approved),
+    },
+    {
+      name: "Oportunidades ganhas",
+      color: "#8b5cf6",
+      values: evolution.map((e) => e.opportunities_won),
+    },
   ];
+  const hasEvolution = evolution.some(
+    (e) =>
+      e.new_customers +
+        e.proposals_sent +
+        e.proposals_approved +
+        e.opportunities_won >
+      0,
+  );
 
   return (
     <AppShell>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Visão Geral</h1>
-          <p className="text-sm text-slate-500">
-            Panorama do portfólio de marcas e patentes.
-          </p>
-        </div>
-        <Link
-          href="/analises"
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          + Nova Análise IA
-        </Link>
-      </div>
+      <PageHeader
+        title="Visão Geral"
+        description="Desempenho comercial e operacional da sua operação."
+        actions={
+          <div className="flex items-center gap-2">
+            <select
+              value={months}
+              onChange={(e) => setMonths(Number(e.target.value))}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-slate-600"
+              aria-label="Período"
+            >
+              <option value={12}>Últimos 12 meses</option>
+              <option value={24}>Últimos 24 meses</option>
+            </select>
+            <Link href="/crm/oportunidades">
+              <Button>+ Nova oportunidade</Button>
+            </Link>
+          </div>
+        }
+      />
 
       {isLoading && <Spinner />}
       {error && (
@@ -92,146 +120,281 @@ export default function DashboardPage() {
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              label="Clientes"
-              value={data.customers ?? data.users}
+              label="Clientes ativos"
+              value={data.counters.active_customers}
+              detail={`${data.counters.new_customers_period} novos no período`}
               tone="brand"
               icon="👥"
+              href="/clientes"
+            />
+            <StatCard
+              label="Oportunidades em negociação"
+              value={data.counters.open_opportunities}
+              detail={`${data.counters.proposals_open} propostas abertas`}
+              tone="violet"
+              icon="🎯"
+              href="/crm/oportunidades"
+            />
+            <StatCard
+              label="Propostas a enviar"
+              value={data.counters.proposals_to_send}
+              hint="Propostas em rascunho ou pendentes de envio"
+              tone="amber"
+              icon="📤"
+              href="/crm/propostas"
+            />
+            <StatCard
+              label="Propostas aguardando retorno"
+              value={data.counters.proposals_awaiting_reply}
+              hint="Enviadas, aguardando resposta do cliente"
+              tone="slate"
+              icon="⏳"
+              href="/crm/propostas"
+            />
+            <StatCard
+              label="Propostas aprovadas"
+              value={data.counters.proposals_approved}
+              detail={`Conversão: ${
+                data.counters.conversion_rate === null
+                  ? "sem histórico decisório"
+                  : `${data.counters.conversion_rate}%`
+              }`}
+              tone="green"
+              icon="✅"
+              href="/crm/propostas"
             />
             <StatCard
               label="Marcas monitoradas"
-              value={data.marcas}
-              tone="green"
+              value={data.counters.monitored_marcas}
+              tone="brand"
               icon="®"
+              href="/monitoramento"
             />
-            <StatCard label="Patentes" value={data.patentes} tone="slate" icon="📄" />
+            <StatCard
+              label="Patentes monitoradas"
+              value={data.counters.monitored_patentes}
+              tone="brand"
+              icon="📄"
+              href="/monitoramento"
+            />
             <StatCard
               label="Alertas críticos"
-              value={(data.upcoming_deadlines ?? []).filter(
-                (d) => (d.dias_restantes ?? 999) <= 90,
-              ).length}
+              value={data.counters.critical_alerts}
+              hint="Propostas vencidas/próximas e follow-ups em atraso"
               tone="red"
               icon="⚠"
+              href="/crm/propostas"
             />
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader
-                title="Evolução do portfólio"
-                subtitle="Depósitos por ano — Marcas vs Patentes"
+                title="Evolução comercial"
+                subtitle={`Últimos ${months} meses`}
               />
               <CardBody>
-                {evolution.length > 0 ? (
-                  <LineChart
-                    labels={evolution.map((e) => String(e.ano))}
-                    series={lines}
-                  />
+                {hasEvolution ? (
+                  <LineChart labels={chartLabels} series={series} />
                 ) : (
-                  <p className="py-8 text-center text-sm text-slate-400">
-                    Sem dados de depósito importados.
-                  </p>
+                  <div className="py-8 text-center">
+                    <p className="text-sm text-slate-500">
+                      Ainda não há histórico comercial suficiente para exibir o
+                      gráfico.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Cadastre clientes, oportunidades e propostas para começar a
+                      acompanhar a evolução.
+                    </p>
+                    <Link
+                      href="/crm/oportunidades"
+                      className="mt-3 inline-block"
+                    >
+                      <Button variant="secondary">Cadastrar oportunidade</Button>
+                    </Link>
+                  </div>
                 )}
               </CardBody>
             </Card>
 
             <Card>
-              <CardHeader title="Situação das marcas" subtitle="Distribuição geral" />
+              <CardHeader
+                title="Funil de vendas"
+                subtitle="Etapas do comercial"
+              />
               <CardBody>
-                <DonutChart
-                  data={(data.situacao_distribution ?? []).map((s) => ({
-                    label: s.label,
-                    value: s.value,
-                  }))}
-                  centerLabel="marcas"
+                <Funnel
+                  stages={data.funnel}
+                  hrefFor={(stage) => `/crm/oportunidades?stage=${stage.stage}`}
                 />
               </CardBody>
             </Card>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader title="Últimos eventos do INPI" />
-              <CardBody className="space-y-3">
-                {(data.latest_events ?? []).map((e, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between border-b border-gray-50 pb-2 last:border-0"
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title="Propostas que precisam de ação"
+                subtitle="Priorizadas por urgência"
+                action={
+                  <Link
+                    href="/crm/propostas"
+                    className="text-xs font-medium text-brand-600 hover:underline"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-700">
-                        {e.titulo}
-                      </p>
-                      <p className="text-xs text-slate-400">{e.numero_inpi || "—"}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge tone={e.tipo === "marca" ? "blue" : "slate"}>
-                        {e.tipo}
-                      </Badge>
-                      <span className="text-xs text-slate-400">
-                        {e.data ? new Date(e.data).toLocaleDateString("pt-BR") : "—"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-                {(data.latest_events ?? []).length === 0 && (
-                  <p className="py-4 text-center text-sm text-slate-400">
-                    Nenhum evento recente.
+                    Ver todas
+                  </Link>
+                }
+              />
+              <CardBody className="p-0">
+                {data.pending_proposals.length === 0 ? (
+                  <p className="px-5 py-8 text-center text-sm text-slate-400">
+                    Nenhuma proposta pendente.
                   </p>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {data.pending_proposals.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-slate-800">
+                            {p.title}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {p.code}
+                            {p.customer_name ? ` · ${p.customer_name}` : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge tone="amber">
+                            {PENDING_REASON_LABELS[p.reason]}
+                          </Badge>
+                          <span className="text-sm font-medium text-slate-700">
+                            {currency(p.total_value)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </CardBody>
             </Card>
 
             <Card>
-              <CardHeader title="Próximos prazos" subtitle="Vigências mais próximas" />
+              <CardHeader
+                title="Atividade recente"
+                subtitle="Eventos reais da sua operação"
+              />
               <CardBody className="space-y-3">
-                {(data.upcoming_deadlines ?? []).map((d, i) => {
-                  const dias = d.dias_restantes ?? 0;
-                  const tone = dias <= 90 ? "red" : dias <= 365 ? "amber" : "green";
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between border-b border-gray-50 pb-2 last:border-0"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-700">
-                          {d.titulo}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {d.data_vigencia
-                            ? new Date(d.data_vigencia).toLocaleDateString("pt-BR")
-                            : "—"}
-                        </p>
-                      </div>
-                      <Badge tone={tone}>{dias} dias</Badge>
-                    </div>
-                  );
-                })}
-                {(data.upcoming_deadlines ?? []).length === 0 && (
+                {data.recent_activity.length === 0 && (
                   <p className="py-4 text-center text-sm text-slate-400">
-                    Nenhum prazo futuro cadastrado.
+                    Nenhuma atividade registrada ainda.
                   </p>
                 )}
+                {data.recent_activity.map((item, index) => (
+                  <div
+                    key={`${item.kind}-${index}`}
+                    className="flex items-start gap-3 border-b border-gray-50 pb-3 last:border-0 last:pb-0"
+                  >
+                    <span className="mt-0.5 text-base" aria-hidden="true">
+                      {ACTIVITY_ICONS[item.kind] ?? "•"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-slate-700">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {new Date(item.at).toLocaleDateString("pt-BR")}
+                        {item.status ? ` · ${item.status}` : ""}
+                      </p>
+                    </div>
+                    {item.link && (
+                      <Link
+                        href={item.link}
+                        className="shrink-0 text-xs text-brand-600 hover:underline"
+                      >
+                        Abrir
+                      </Link>
+                    )}
+                  </div>
+                ))}
               </CardBody>
             </Card>
           </div>
 
           <Card className="mt-6">
-            <CardHeader title="Módulos habilitados" />
-            <CardBody className="flex flex-wrap gap-2">
-              {data.modules.map((m) => (
-                <Badge key={m} tone="blue">
-                  {m}
-                </Badge>
-              ))}
-              {data.modules.length === 0 && (
-                <span className="text-sm text-slate-400">
-                  Nenhum módulo atribuído.
-                </span>
+            <CardHeader
+              title="Próximos prazos e alertas"
+              subtitle="Prazos comerciais separados dos prazos de propriedade intelectual"
+            />
+            <CardBody className="p-0">
+              {data.deadlines.length === 0 ? (
+                <p className="px-5 py-8 text-center text-sm text-slate-400">
+                  Nenhum prazo registrado.
+                </p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {data.deadlines.map((d, index) => (
+                    <div
+                      key={`${d.title}-${index}`}
+                      className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-800">
+                          {d.title}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          {d.subtitle || "—"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          tone={d.domain === "COMMERCIAL" ? "blue" : "slate"}
+                        >
+                          {d.domain === "COMMERCIAL"
+                            ? "Comercial"
+                            : "Propriedade intelectual"}
+                        </Badge>
+                        <Badge
+                          tone={
+                            d.tone === "red"
+                              ? "red"
+                              : d.tone === "amber"
+                                ? "amber"
+                                : "green"
+                          }
+                        >
+                          {d.days_remaining === null
+                            ? "—"
+                            : `${d.days_remaining} dias`}
+                        </Badge>
+                        {d.link && (
+                          <Link
+                            href={d.link}
+                            className="text-xs text-brand-600 hover:underline"
+                          >
+                            Abrir
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardBody>
           </Card>
+
+          {data.counters.proposals_rejected > 0 && (
+            <p className="mt-4 text-xs text-slate-400">
+              {data.counters.proposals_rejected} proposta(s) recusada(s) no
+              período. Os indicadores acima consideram apenas os dados do seu
+              tenant.
+            </p>
+          )}
         </>
       )}
     </AppShell>
   );
 }
+

@@ -371,7 +371,7 @@ function SimilarTab({ report }: { report: AnalysisReport }) {
   if (report.similar_brands.length === 0)
     return <p className="py-4 text-sm text-slate-400">Nenhuma marca similar encontrada.</p>;
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-100">
+    <div className="scrollbar-thin overflow-x-auto rounded-lg border border-gray-100">
       <table className="min-w-full text-sm">
         <thead className="bg-slate-50">
           <tr>

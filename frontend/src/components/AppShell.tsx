@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/app/auth-context";
+import ChatWidget from "./ChatWidget";
+import UserMenu from "./UserMenu";
 
 type NavItem = {
   href: string;
@@ -14,42 +16,106 @@ type NavItem = {
   children?: { href: string; label: string; perm: string | null }[];
 };
 
+/**
+ * Sidebar structure (three blocks, no decoration):
+ *
+ *   1. Visão Geral      — the business dashboard
+ *   2. CRM / Clientes   — the commercial hub (clients, funnel, proposals, follow-ups)
+ *   3. INPI             — expandable: marca/patente research, monitoring, AI, reports
+ *   4. NIT              — expandable: the institutional innovation modules
+ *
+ * Administração deliberately lives in the user dropdown (``UserMenu``), not here.
+ */
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Visão Geral", perm: null, icon: "grid" },
-  { href: "/clientes", label: "Clientes", perm: "COMPANY_VIEW", icon: "users" },
-  { href: "/marcas", label: "Marcas", perm: "MARCAS_SEARCH", icon: "tag" },
-  { href: "/patentes", label: "Patentes", perm: "PATENTES_SEARCH", icon: "file" },
   {
-    href: "/monitoramento",
-    label: "Monitoramento",
-    perm: "MARCAS_VIEW",
-    icon: "radar",
-  },
-  {
-    href: "/analises",
-    label: "Análises IA",
-    perm: "MARCAS_SEARCH",
-    icon: "sparkles",
-  },
-  {
-    href: "/relatorios",
-    label: "Relatórios",
-    perm: "RELATORIOS_VIEW",
-    icon: "chart",
-  },
-  {
-    href: "/admin",
-    label: "Administração",
-    perm: "SYNC_VIEW",
-    icon: "settings",
+    href: "/crm",
+    label: "CRM / Clientes",
+    perm: "COMPANY_VIEW",
+    icon: "briefcase",
     children: [
-      { href: "/admin", label: "Sincronização INPI", perm: "SYNC_VIEW" },
-      { href: "/admin/usuarios", label: "Usuários", perm: "USER_VIEW" },
-      { href: "/admin/tenants", label: "Tenants", perm: "TENANT_VIEW" },
-      { href: "/admin/modulos", label: "Módulos & Papéis", perm: "MODULE_VIEW" },
+      { href: "/crm", label: "Visão comercial", perm: "CRM_DASHBOARD_VIEW" },
+      { href: "/crm/oportunidades", label: "Leads e oportunidades", perm: "CRM_OPPORTUNITY_VIEW" },
+      { href: "/crm/propostas", label: "Propostas comerciais", perm: "CRM_PROPOSAL_VIEW" },
+      { href: "/crm/atividades", label: "Atividades e follow-ups", perm: "CRM_ACTIVITY_VIEW" },
+      { href: "/clientes", label: "Clientes e empresas", perm: "COMPANY_VIEW" },
+    ],
+  },
+  {
+    href: "/inpi",
+    label: "INPI",
+    perm: "MARCAS_SEARCH",
+    icon: "search",
+    children: [
+      { href: "/marcas", label: "Marcas", perm: "MARCAS_SEARCH" },
+      { href: "/patentes", label: "Patentes", perm: "PATENTES_SEARCH" },
+      { href: "/monitoramento", label: "Monitoramento", perm: "MARCAS_VIEW" },
+      { href: "/analises", label: "Análises de IA", perm: "MARCAS_SEARCH" },
+      { href: "/relatorios", label: "Relatórios", perm: "RELATORIOS_VIEW" },
+    ],
+  },
+  {
+    href: "/nit",
+    label: "NIT",
+    perm: "NIT_DISCLOSURE_VIEW",
+    icon: "flask",
+    children: [
+      { href: "/nit", label: "Painel do NIT", perm: "NIT_REPORT_VIEW" },
+      { href: "/nit/comunicacoes", label: "Comunicações", perm: "NIT_DISCLOSURE_VIEW" },
+      { href: "/nit/ativos", label: "Portfólio de Ativos", perm: "NIT_ASSET_VIEW" },
+      { href: "/nit/portfolio", label: "Portfólio avançado", perm: "NIT_PORTFOLIO_VIEW" },
+      { href: "/nit/comites", label: "Comitês", perm: "NIT_COMMITTEE_VIEW" },
+      { href: "/nit/catalogo", label: "Catálogo de Tecnologias", perm: "NIT_OFFER_VIEW" },
+      { href: "/nit/negociacoes", label: "Negociações", perm: "NIT_NEGOTIATION_VIEW" },
+      { href: "/nit/contratos", label: "Contratos", perm: "NIT_CONTRACT_VIEW" },
+      { href: "/nit/projetos", label: "Projetos de P&D", perm: "NIT_PROJECT_VIEW" },
+      { href: "/nit/startups", label: "Startups", perm: "NIT_STARTUP_VIEW" },
+      { href: "/nit/incubacao", label: "Incubação", perm: "NIT_STARTUP_VIEW" },
+      { href: "/nit/indicadores", label: "Indicadores & FORMICT", perm: "NIT_INDICATOR_VIEW" },
+      { href: "/nit/notificacoes", label: "Notificações", perm: "NIT_NOTIFICATION_VIEW" },
+      { href: "/nit/bi", label: "BI & Relatórios", perm: "NIT_BI_VIEW" },
+      { href: "/nit/portais", label: "Portais externos", perm: "NIT_PORTAL_VIEW" },
+      { href: "/nit/integracoes", label: "Integrações", perm: "NIT_INTEGRATION_VIEW" },
+      { href: "/nit/documentos", label: "Documentos", perm: "NIT_DOCUMENT_VIEW" },
     ],
   },
 ];
+
+/**
+ * Where a grouped entry sends the user when clicked while inactive.
+ * ``/inpi`` has no screen of its own, so it defaults to its first child.
+ */
+const GROUP_LANDING: Record<string, string> = {
+  "/inpi": "/marcas",
+  "/crm": "/crm",
+  "/nit": "/nit",
+};
+
+/** Longest-prefix match so "/crm/propostas" highlights the CRM group. */
+function findActiveGroup(pathname: string): NavItem | undefined {
+  return NAV.filter((n) => n.children)
+    .filter((n) => n.children!.some((c) => pathname === c.href || pathname.startsWith(c.href + "/")))
+    .sort(
+      (a, b) =>
+        Math.max(...b.children!.map((c) => c.href.length)) -
+        Math.max(...a.children!.map((c) => c.href.length)),
+    )[0];
+}
+
+/** The deepest child matching the current path (for the header title). */
+function findActiveLabel(pathname: string, visible: NavItem[]): string {
+  for (const group of visible) {
+    if (!group.children) continue;
+    const child = group.children
+      .filter((c) => pathname === c.href || pathname.startsWith(c.href + "/"))
+      .sort((a, b) => b.href.length - a.href.length)[0];
+    if (child) return child.label;
+  }
+  const top = visible
+    .filter((n) => pathname.startsWith(n.href))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  return top?.label ?? "Painel";
+}
 
 function Icon({ name }: { name: string }) {
   const common = {
@@ -118,6 +184,29 @@ function Icon({ name }: { name: string }) {
           <path d="M7 15l3-3 3 3 5-6" />
         </svg>
       );
+    case "flask":
+      return (
+        <svg {...common}>
+          <path d="M9 3h6" />
+          <path d="M10 3v6.5L5.2 17A2 2 0 0 0 7 20h10a2 2 0 0 0 1.8-3L14 9.5V3" />
+          <path d="M7.5 14h9" />
+        </svg>
+      );
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      );
+    case "briefcase":
+      return (
+        <svg {...common}>
+          <rect x="2" y="7" width="20" height="14" rx="2" />
+          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+          <path d="M2 13h20" />
+        </svg>
+      );
     case "settings":
       return (
         <svg {...common}>
@@ -131,18 +220,21 @@ function Icon({ name }: { name: string }) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout, has } = useAuth();
+  const { user, loading, has } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(pathname.startsWith("/admin"));
+  const [openGroup, setOpenGroup] = useState<string | null>(
+    findActiveGroup(pathname)?.href ?? null,
+  );
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [loading, user, router]);
 
   useEffect(() => {
-    setAdminOpen(pathname.startsWith("/admin"));
+    const match = findActiveGroup(pathname);
+    setOpenGroup(match ? match.href : null);
     setOpen(false);
   }, [pathname]);
 
@@ -154,7 +246,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const visibleNav = NAV.filter((n) => !n.perm || has(n.perm));
+  const visibleNav = NAV.filter((n) => {
+    if (!n.perm || has(n.perm)) return true;
+    // A group stays visible when at least one child is permitted.
+    return !!n.children?.some((c) => !c.perm || has(c.perm));
+  });
+
+  // Deepest matching child, used to highlight the exact sub-item.
+  const activeChild = visibleNav
+    .flatMap((n) => n.children ?? [])
+    .filter(
+      (c) => pathname === c.href || pathname.startsWith(`${c.href}/`),
+    )
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <div className="min-h-screen lg:flex">
@@ -186,23 +290,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <nav className="mt-2 space-y-1 px-3 pb-24">
           {visibleNav.map((n) => {
-            const active =
-              n.href === "/admin"
-                ? pathname === "/admin"
-                : pathname.startsWith(n.href);
+            const active = pathname === n.href || pathname.startsWith(`${n.href}/`);
             if (n.children) {
+              const groupOpen = openGroup === n.href;
+              const groupActive = findActiveGroup(pathname)?.href === n.href;
               return (
                 <div key={n.href}>
                   <button
                     onClick={() => {
-                      if (!pathname.startsWith("/admin")) {
-                        router.push("/admin");
+                      if (!groupActive) {
+                        router.push(GROUP_LANDING[n.href] ?? n.href);
                       } else {
-                        setAdminOpen((v) => !v);
+                        setOpenGroup((v) => (v === n.href ? null : n.href));
                       }
                     }}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                      pathname.startsWith("/admin")
+                      groupActive
                         ? "bg-sidebar-hover text-white"
                         : "text-sidebar-muted hover:bg-sidebar-light hover:text-white"
                     }`}
@@ -217,13 +320,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       stroke="currentColor"
                       strokeWidth="2"
                       className={`transition-transform ${
-                        adminOpen ? "rotate-180" : ""
+                        groupOpen ? "rotate-180" : ""
                       }`}
                     >
                       <path d="m6 9 6 6 6-6" />
                     </svg>
                   </button>
-                  {adminOpen && (
+                  {groupOpen && (
                     <div className="mt-1 space-y-1 pl-9">
                       {n.children
                         .filter((c) => !c.perm || has(c.perm))
@@ -232,8 +335,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                             key={c.href}
                             href={c.href}
                             className={`block rounded-lg px-3 py-1.5 text-sm transition ${
-                              pathname === c.href
-                                ? "text-white"
+                              activeChild === c.href
+                                ? "bg-white/10 font-medium text-white"
                                 : "text-sidebar-muted hover:text-white"
                             }`}
                           >
@@ -274,40 +377,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <div className="flex-1">
         <header className="sticky top-0 z-20 border-b border-gray-100 bg-white/90 backdrop-blur">
-          <div className="flex items-center justify-between px-4 py-3 lg:px-8">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">
-                {visibleNav.find((n) => pathname.startsWith(n.href))?.label ||
-                  "Painel"}
+          <div className="flex items-center justify-between gap-4 px-4 py-3 lg:px-8">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-800">
+                {findActiveLabel(pathname, visibleNav)}
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="truncate text-xs text-slate-400">
                 Plataforma de Propriedade Industrial
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="hidden text-right sm:block">
-                <p className="text-sm font-medium text-slate-800">{user.name}</p>
-                <p className="text-xs text-slate-500">
-                  {user.is_master_admin
-                    ? "Master Admin"
-                    : user.tenant_name || "Sem tenant"}
-                </p>
-              </div>
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
-                {user.name.charAt(0).toUpperCase()}
-              </div>
-              <button
-                onClick={() => logout().then(() => router.push("/login"))}
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Sair
-              </button>
-            </div>
+            <UserMenu />
           </div>
         </header>
 
-        <main className="mx-auto max-w-7xl px-4 py-6 lg:px-8">{children}</main>
+        <main className="mx-auto w-full min-w-0 max-w-[1600px] px-4 py-6 lg:px-8">
+          {children}
+        </main>
       </div>
+
+      {/* Assistente flutuante (chat) */}
+      <ChatWidget />
     </div>
   );
 }

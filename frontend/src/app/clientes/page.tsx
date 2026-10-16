@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 import AppShell from "@/components/AppShell";
 import {
@@ -467,9 +468,15 @@ function CustomersTab() {
                 </Td>
                 <Td>
                   <div className="flex items-center gap-3">
+                    <Link
+                      href={`/clientes/${c.id}`}
+                      className="text-xs font-medium text-brand-600 hover:underline"
+                    >
+                      Abrir
+                    </Link>
                     <button
                       onClick={() => openEdit(c)}
-                      className="text-xs font-medium text-brand-600 hover:underline"
+                      className="text-xs font-medium text-slate-500 hover:underline"
                     >
                       Editar
                     </button>

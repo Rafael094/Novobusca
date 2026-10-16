@@ -215,3 +215,130 @@ def test_patentes_monitoring_list_and_removal(db, seeded, client):
         ]
         == 0
     )
+
+
+def test_monitoring_list_includes_enriched_marca_data(db, seeded, client):
+    """The watch list carries the *full* marca payload (dates, despachos,
+    titulares, vigência and logo status) — no second request per row."""
+    from datetime import date, timedelta
+
+    from app.models import MarcaDespacho, MarcaDepositante
+
+    tenant = make_tenant(db, name="MonEnrich", module_codes=["MARCAS", "BUSCA"])
+    db.add(
+        Marca(
+            codigo_interno="900000020",
+            numero_inpi="900000020",
+            elemento_nominativo="ENRIQUECIDA",
+            descricao_situacao="Registro de marca em vigor",
+            data_deposito=date(2020, 1, 10),
+            data_publicacao=date(2020, 3, 1),
+            data_concessao=date(2021, 5, 20),
+            data_vigencia=date.today() + timedelta(days=90),
+            descricao_apresentacao="Mista",
+            descricao_natureza="Produto e Serviço",
+        )
+    )
+    db.add(
+        MarcaDepositante(
+            codigo_interno="900000020",
+            numero_inpi="900000020",
+            nome="EMPRESA ALFA LTDA",
+        )
+    )
+    db.add(
+        MarcaDepositante(
+            codigo_interno="900000020",
+            numero_inpi="900000020",
+            nome="EMPRESA BETA S.A.",
+        )
+    )
+    db.add(
+        MarcaDespacho(
+            codigo_interno="900000020",
+            numero_inpi="900000020",
+            numero_rpi="2500",
+            data_rpi=date(2023, 6, 1),
+            codigo_despacho="REN",
+            descricao_despacho="Renovação deferida",
+        )
+    )
+    db.add(
+        MarcaDespacho(
+            codigo_interno="900000020",
+            numero_inpi="900000020",
+            numero_rpi="2600",
+            data_rpi=date(2024, 8, 15),
+            codigo_despacho="PUB",
+            descricao_despacho="Publicação do registro",
+        )
+    )
+    db.commit()
+
+    _user, headers = _analista(
+        client, db, email="enrich@example.com", tenant_id=tenant.id
+    )
+    client.post(
+        "/api/marcas/900000020/monitoramento",
+        headers=headers,
+        json={"active": True},
+    )
+
+    listed = client.get("/api/marcas/monitoramento", headers=headers).json()
+    assert listed["pagination"]["total"] == 1
+    item = listed["items"][0]
+
+    # Datas / lifecycle
+    assert item["data_deposito"] == "2020-01-10"
+    assert item["data_publicacao"] == "2020-03-01"
+    assert item["data_concessao"] == "2021-05-20"
+    assert item["data_vigencia"] == (date.today() + timedelta(days=90)).isoformat()
+
+    # Características
+    assert item["descricao_apresentacao"] == "Mista"
+    assert item["descricao_natureza"] == "Produto e Serviço"
+
+    # Titulares (ordered, principal = first)
+    assert item["num_titulares"] == 2
+    assert item["titulares"] == ["EMPRESA ALFA LTDA", "EMPRESA BETA S.A."]
+    assert item["titular_principal"] == "EMPRESA ALFA LTDA"
+
+    # Despachos agregados: most recent by data_rpi wins
+    assert item["total_despachos"] == 2
+    assert item["data_ultimo_despacho"] == "2024-08-15"
+    assert item["ultimo_despacho"] == "Publicação do registro"
+
+    # Vencimento derivado da vigência (dentro da janela de "breve").
+    assert item["dias_para_vencer"] == 90
+    assert item["vencido"] is False
+    assert item["vence_em_breve"] is True
+
+    # Logo ainda não processado → sem imagem (a busca sob demanda ocorre uma vez).
+    assert item["tem_logo"] is False
+
+
+def test_monitoring_list_flags_expired_marca(db, seeded, client):
+    """A marca whose vigência is in the past is flagged as ``vencido``."""
+    from datetime import date, timedelta
+
+    tenant = make_tenant(db, name="MonExpired", module_codes=["MARCAS", "BUSCA"])
+    db.add(
+        Marca(
+            codigo_interno="900000021",
+            numero_inpi="900000021",
+            elemento_nominativo="VENCIDA",
+            data_vigencia=date.today() - timedelta(days=30),
+        )
+    )
+    db.commit()
+    _user, headers = _analista(
+        client, db, email="expired@example.com", tenant_id=tenant.id
+    )
+    client.post(
+        "/api/marcas/900000021/monitoramento", headers=headers, json={"active": True}
+    )
+
+    item = client.get("/api/marcas/monitoramento", headers=headers).json()["items"][0]
+    assert item["vencido"] is True
+    assert item["vence_em_breve"] is False
+    assert item["dias_para_vencer"] == -30

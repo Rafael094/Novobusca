@@ -132,7 +132,7 @@ export default function MarcasPage() {
       )}
 
       {/* Desktop: table */}
-      <div className="hidden overflow-hidden rounded-2xl bg-white shadow-sm md:block">
+      <div className="scrollbar-thin hidden overflow-x-auto rounded-2xl bg-white shadow-sm md:block">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>

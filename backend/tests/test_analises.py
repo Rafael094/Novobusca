@@ -44,6 +44,74 @@ def test_analysis_returns_503_when_not_configured(client, db, seeded, monkeypatc
     assert resp.status_code == 503
 
 
+def test_analysis_report_includes_patents(client, db, seeded, monkeypatch):
+    """Regression: patents are retrieved without crashing (title lives on
+    ``patentes_conteudo``, not on the bibliographic ``patente`` row).
+
+    Before the fix, ``_retrieve_patentes`` read ``Patente.titulo`` (no such
+    attribute) -> AttributeError -> HTTP 500 whenever ``include_patentes`` was
+    on, which the browser surfaced as "Failed to fetch".
+    """
+    from app.models import Patente, PatenteConteudo, PatenteDepositante
+
+    tenant = make_tenant(db, name="AI Pat", module_codes=["ADMIN", "MARCAS"])
+    headers = _token(client, db, seeded, email="pat@example.com", tenant_id=tenant.id)
+
+    db.add(Patente(codigo_interno="pat-1", numero_inpi="BR1234567"))
+    db.add(
+        PatenteConteudo(
+            codigo_interno="pat-1",
+            numero_inpi="BR1234567",
+            titulo="DISPOSITIVO ZETALAB DE TESTE",
+            resumo="Dispositivo para laboratorio Zeta.",
+        )
+    )
+    db.add(
+        PatenteDepositante(
+            codigo_interno="pat-1",
+            numero_inpi="BR1234567",
+            ordem="1",
+            depositante="Zeta Pesquisas Ltda",
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(deepseek, "is_configured", lambda: True)
+    monkeypatch.setattr(
+        deepseek,
+        "chat",
+        lambda *a, **k: deepseek.DeepSeekResult(
+            content=json.dumps(
+                {
+                    "overall_risk": "baixo",
+                    "score": 10,
+                    "summary": "Sem conflitos relevantes.",
+                    "conflicts": [],
+                    "recommendations": [],
+                }
+            ),
+            model="deepseek-chat",
+        ),
+    )
+
+    resp = client.post(
+        "/api/analises",
+        headers=headers,
+        json={
+            "brand_name": "Zetalab",
+            "nice_classes": [],
+            "options": {"include_patentes": True, "strict_nice": False},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["related_patents"]) >= 1
+    patents = {p["titulo"]: p for p in body["related_patents"]}
+    entry = patents["DISPOSITIVO ZETALAB DE TESTE"]
+    assert entry["numero_inpi"] == "BR1234567"
+    assert entry["depositante"] == "Zeta Pesquisas Ltda"
+
+
 def test_analysis_report_with_stubbed_model(client, db, seeded, monkeypatch):
     tenant = make_tenant(db, name="AI On", module_codes=["ADMIN", "MARCAS"])
     headers = _token(client, db, seeded, email="on@example.com", tenant_id=tenant.id)

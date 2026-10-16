@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import AppShell from "@/components/AppShell";
 import {
   Badge,
   Button,
@@ -103,7 +102,7 @@ export default function UsuariosPage() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Usuários</h1>
@@ -275,6 +274,6 @@ export default function UsuariosPage() {
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
       </Modal>
-    </AppShell>
+    </>
   );
 }

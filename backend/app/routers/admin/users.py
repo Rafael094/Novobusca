@@ -66,8 +66,56 @@ def _assert_same_tenant(ctx: AccessContext, user: User) -> None:
         )
 
 
-def _set_roles(db: Session, user_id: uuid.UUID, role_ids: list[uuid.UUID]) -> None:
-    # Validate roles belong to the tenant or are system roles.
+def _set_roles(
+    db: Session,
+    user_id: uuid.UUID,
+    role_ids: list[uuid.UUID],
+    *,
+    tenant_id: uuid.UUID | None,
+    actor: User | None = None,
+) -> None:
+    """Replace a user's roles, validating tenant ownership.
+
+    A role may be granted only when it is a *system* role (``tenant_id IS NULL``)
+    or when it belongs to the target user's tenant. This prevents a tenant
+    administrator from escalating privileges by attaching a role that belongs to
+    another tenant. Master admins bypass the tenant check (platform scope).
+    """
+    if not role_ids:
+        existing = {
+            ur.role_id: ur
+            for ur in db.execute(
+                select(UserRole).where(UserRole.user_id == user_id)
+            ).scalars()
+        }
+        for ur in existing.values():
+            db.delete(ur)
+        return
+
+    roles = {
+        r.id: r
+        for r in db.execute(select(Role).where(Role.id.in_(role_ids))).scalars()
+    }
+    missing = [str(rid) for rid in role_ids if rid not in roles]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Papel não encontrado: {', '.join(missing)}",
+        )
+
+    am_master = bool(actor is not None and actor.is_master_admin)
+    for role in roles.values():
+        if am_master:
+            continue
+        if role.tenant_id is not None and role.tenant_id != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Não é permitido atribuir papel de outro tenant "
+                    f"({role.code})"
+                ),
+            )
+
     existing = {
         ur.role_id: ur
         for ur in db.execute(
@@ -161,7 +209,7 @@ def create_user(
                     user_id=user.id, tenant_id=tid, is_default=(tid == tenant_id)
                 )
             )
-    _set_roles(db, user.id, payload.role_ids)
+    _set_roles(db, user.id, payload.role_ids, tenant_id=tenant_id, actor=ctx.user)
     db.commit()
     db.refresh(user)
     record_audit(
@@ -216,7 +264,13 @@ def update_user(
     if payload.person_id is not None:
         user.person_id = payload.person_id
     if payload.role_ids is not None:
-        _set_roles(db, user.id, payload.role_ids)
+        _set_roles(
+            db,
+            user.id,
+            payload.role_ids,
+            tenant_id=user.tenant_id,
+            actor=ctx.user,
+        )
     db.commit()
     db.refresh(user)
     record_audit(

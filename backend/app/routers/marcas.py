@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -37,6 +37,7 @@ from app.schemas.search import (
     PaginatedMonitoramentos,
     Pagination,
 )
+from app.services.marca_logos import resolve_logo_file
 
 router = APIRouter(prefix="/marcas", tags=["marcas"])
 
@@ -194,6 +195,90 @@ def _load_monitoramento(
     return {m.codigo_interno: m for m in db.execute(stmt).scalars()}
 
 
+# Window (in days) under which a still-valid marca is flagged as "expiring soon".
+VENCIMENTO_BREVE_DIAS = 180
+
+
+def _vencimento_status(
+    data_vigencia: date | None, hoje: date | None = None
+) -> tuple[int | None, bool, bool]:
+    """Return ``(dias_para_vencer, vencido, vence_em_breve)`` for a marca.
+
+    ``dias_para_vencer`` is negative once past the vigência date and ``None``
+    when there is no vigência recorded. ``vence_em_breve`` marks still-valid
+    marcas whose vigência falls within ``VENCIMENTO_BREVE_DIAS``.
+    """
+    if data_vigencia is None:
+        return None, False, False
+    hoje = hoje or datetime.now(timezone.utc).date()
+    dias = (data_vigencia - hoje).days
+    vencido = dias < 0
+    return dias, vencido, (not vencido and dias <= VENCIMENTO_BREVE_DIAS)
+
+
+def _load_despacho_agg(
+    db: Session, codigos: list[str]
+) -> dict[str, tuple[int, date | None, str | None]]:
+    """Return {codigo: (total, data_ultimo, descricao_ultimo)} for the page.
+
+    A single aggregated query (fixed cost, no N+1). The "último despacho" is the
+    row with the most recent ``data_rpi`` (ties broken by RPI number).
+    """
+    if not codigos:
+        return {}
+    out: dict[str, tuple[int, date | None, str | None]] = {}
+    totals = db.execute(
+        select(MarcaDespacho.codigo_interno, func.count(MarcaDespacho.id))
+        .where(MarcaDespacho.codigo_interno.in_(codigos))
+        .group_by(MarcaDespacho.codigo_interno)
+    ).all()
+    for codigo, total in totals:
+        out[codigo] = (int(total), None, None)
+
+    # Latest despacho per marca: ordered so the first row seen per code wins.
+    latest = db.execute(
+        select(
+            MarcaDespacho.codigo_interno,
+            MarcaDespacho.data_rpi,
+            MarcaDespacho.descricao_despacho,
+        )
+        .where(MarcaDespacho.codigo_interno.in_(codigos))
+        .order_by(
+            MarcaDespacho.codigo_interno,
+            MarcaDespacho.data_rpi.desc().nullslast(),
+            MarcaDespacho.numero_rpi.desc().nullslast(),
+        )
+    ).all()
+    seen: set[str] = set()
+    for codigo, data_rpi, descricao in latest:
+        if codigo in seen:
+            continue
+        seen.add(codigo)
+        total = out.get(codigo, (0, None, None))[0]
+        out[codigo] = (total, data_rpi, descricao)
+    return out
+
+
+def _load_logos(db: Session, codigos: list[str]) -> dict[str, MarcaLogo]:
+    """Return {codigo: MarcaLogo} for the page (single query, no N+1)."""
+    if not codigos:
+        return {}
+    stmt = select(MarcaLogo).where(MarcaLogo.codigo_interno.in_(codigos))
+    return {row.codigo_interno: row for row in db.execute(stmt).scalars()}
+
+
+def _load_logo(db: Session, codigo_interno: str) -> MarcaLogo | None:
+    """Return the *stored* logo row for a marca (DB-only, no INPI call).
+
+    Logotipos are downloaded by the offline worker (``python -m
+    ingestion.logos``); the API never fetches them during a request. When the
+    image is absent the caller degrades to a placeholder.
+    """
+    return db.execute(
+        select(MarcaLogo).where(MarcaLogo.codigo_interno == codigo_interno)
+    ).scalar_one_or_none()
+
+
 @router.get("/search", response_model=PaginatedMarcas)
 def search_marcas(
     q: str | None = None,
@@ -300,7 +385,13 @@ def list_monitoramento(
     db: Session = Depends(get_db),
     ctx: AccessContext = Depends(require_permission("MARCAS_VIEW")),
 ) -> PaginatedMonitoramentos:
-    """List the current user's monitored marcas (their own watch list only)."""
+    """List the current user's monitored marcas (their own watch list only).
+
+    Each row is enriched with *all* display data of the underlying marca
+    (datas de publicação/concessão/vigência, apresentação/natureza, titulares,
+    agregado de despachos and the vencimento status) so the monitoring screen
+    shows everything without an extra request per row.
+    """
     conditions = [
         MarcaMonitoramento.user_id == ctx.user.id,
         MarcaMonitoramento.deleted_at.is_(None),
@@ -318,6 +409,11 @@ def list_monitoramento(
             Marca.numero_inpi,
             Marca.descricao_situacao,
             Marca.data_deposito,
+            Marca.data_publicacao,
+            Marca.data_concessao,
+            Marca.data_vigencia,
+            Marca.descricao_apresentacao,
+            Marca.descricao_natureza,
         )
         .outerjoin(Marca, Marca.codigo_interno == MarcaMonitoramento.codigo_interno)
         .where(*conditions)
@@ -325,14 +421,65 @@ def list_monitoramento(
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
+
+    # Aggregate the relations for the current page only (fixed number of
+    # queries keyed by codigo_interno — no N+1).
+    page_ids = [r[0].codigo_interno for r in rows]
+    titulares = _load_titulares(db, page_ids)
+    despachos = _load_despacho_agg(db, page_ids)
+    logos = _load_logos(db, page_ids)
+
     items: list[MonitoramentoOut] = []
-    for row, nominativo, numero_inpi, situacao, data_deposito in rows:
+    for (
+        row,
+        nominativo,
+        numero_inpi,
+        situacao,
+        data_deposito,
+        data_publicacao,
+        data_concessao,
+        data_vigencia,
+        descricao_apresentacao,
+        descricao_natureza,
+    ) in rows:
         out = MonitoramentoOut.model_validate(row)
         out.tipo = "marca"
         out.titulo = nominativo
         out.numero_inpi = numero_inpi
         out.situacao = situacao
         out.data_deposito = data_deposito
+        out.data_publicacao = data_publicacao
+        out.data_concessao = data_concessao
+        out.data_vigencia = data_vigencia
+        out.descricao_apresentacao = descricao_apresentacao
+        out.descricao_natureza = descricao_natureza
+
+        nomes = titulares.get(row.codigo_interno, [])
+        out.titulares = nomes
+        out.num_titulares = len(nomes)
+        out.titular_principal = nomes[0] if nomes else None
+
+        total_desp, data_ultimo, desc_ultimo = despachos.get(
+            row.codigo_interno, (0, None, None)
+        )
+        out.total_despachos = total_desp
+        out.data_ultimo_despacho = data_ultimo
+        out.ultimo_despacho = desc_ultimo
+
+        dias, vencido, breve = _vencimento_status(data_vigencia)
+        out.dias_para_vencer = dias
+        out.vencido = vencido
+        out.vence_em_breve = breve
+
+        # Logo: DB-only. The offline worker (``ingestion.logos``) downloads the
+        # images; the API just reflects what is stored and shows a placeholder
+        # whenever the image is absent.
+        logo = logos.get(row.codigo_interno)
+        if logo is None and row.codigo_interno:
+            logo = _load_logo(db, row.codigo_interno)
+        out.tem_logo = bool(logo and logo.status == "OK")
+        out.logo_status = logo.status if logo else None
+
         items.append(out)
     return PaginatedMonitoramentos(
         pagination=Pagination(page=page, page_size=page_size, total=int(total)),
@@ -545,28 +692,20 @@ def get_marca_logo(
     db: Session = Depends(get_db),
     ctx: AccessContext = Depends(require_permission("MARCAS_VIEW")),
 ) -> FileResponse:
-    """Stream the locally downloaded logotipo for a marca, if present.
+    """Stream the stored logotipo for a marca (DB-only, no INPI call).
 
-    Returns 404 when there is no stored image (never-processed code, placeholder
-    ``SEM_IMAGEM``, or a missing file on disk). The image bytes are served as-is
-    from ``data/raw/marcas/logos/<bucket>/<codigo>.jpg``.
+    The images are downloaded by the offline worker (``python -m
+    ingestion.logos``); this endpoint only serves what is already stored in
+    ``marcas_logos``/``data/raw/marcas/logos/...``. Returns 404 when the image
+    was never downloaded (or is a placeholder / unrecoverable error).
     """
-    logo = db.execute(
-        select(MarcaLogo).where(MarcaLogo.codigo_interno == codigo_interno)
-    ).scalar_one_or_none()
-    if logo is None or logo.status != "OK" or not logo.arquivo:
+    resolved = resolve_logo_file(db, codigo_interno, allow_fetch=False)
+    if resolved is None:
         raise HTTPException(status_code=404, detail="Logotipo não disponível")
-
-    # ``arquivo`` may be stored absolute or relative to the data dir; resolve
-    # relative paths against the configured data directory.
-    path = Path(logo.arquivo)
-    if not path.is_absolute():
-        path = (settings.data_path / path).resolve()
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Logotipo não disponível")
+    path, mime = resolved
 
     return FileResponse(
         path,
-        media_type=logo.mime or "image/jpeg",
+        media_type=mime,
         filename=f"{codigo_interno}{path.suffix or '.jpg'}",
     )

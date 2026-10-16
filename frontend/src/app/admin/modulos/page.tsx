@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import AppShell from "@/components/AppShell";
 import {
   Badge,
   Card,
@@ -23,7 +22,7 @@ export default function ModulosPage() {
   const roles = useAdminRoles();
 
   return (
-    <AppShell>
+    <>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">Módulos & Papéis</h1>
         <p className="text-sm text-slate-500">
@@ -125,6 +124,6 @@ export default function ModulosPage() {
           )}
         </CardBody>
       </Card>
-    </AppShell>
+    </>
   );
 }

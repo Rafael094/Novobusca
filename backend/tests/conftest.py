@@ -17,6 +17,7 @@ import pytest
 
 # Configure the test database BEFORE importing the app so the engine binds to it.
 # Derive the test URL from the app's DATABASE_URL by appending "_test".
+os.environ.setdefault("ENVIRONMENT", "test")
 _APP_URL = os.environ.get("DATABASE_URL")
 if _APP_URL:
     _base, _, _dbname = _APP_URL.rpartition("/")
@@ -147,6 +148,20 @@ def _clean_tables() -> Generator[None, None, None]:
             conn.execute(
                 text(f"TRUNCATE {', '.join(table_names)} RESTART IDENTITY CASCADE")
             )
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _disable_logo_fetch(monkeypatch):
+    """Keep the suite hermetic: never hit the real INPI pePI for logotipos.
+
+    The lazy logo resolver defaults to fetching from INPI on a DB miss. Tests
+    that exercise that path inject a fake session pool and pass
+    ``allow_fetch=True`` explicitly; every other test must stay offline.
+    """
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "logo_fetch_enabled", False, raising=False)
     yield
 
 

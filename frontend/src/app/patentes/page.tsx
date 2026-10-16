@@ -85,7 +85,7 @@ export default function PatentesPage() {
       )}
 
       {submitted && (
-      <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-card">
+      <div className="scrollbar-thin overflow-x-auto rounded-xl border border-gray-100 bg-white shadow-card">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-500">
             <tr>

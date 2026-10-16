@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import AppShell from "@/components/AppShell";
 import {
   Badge,
   Button,
@@ -32,7 +31,7 @@ export default function AdminPage() {
   const progress = total > 0 ? Math.round((imported / total) * 100) : 0;
 
   return (
-    <AppShell>
+    <>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-800">
           Administração · Sincronização INPI
@@ -202,6 +201,6 @@ export default function AdminPage() {
           </tbody>
         </Table>
       </Card>
-    </AppShell>
+    </>
   );
 }

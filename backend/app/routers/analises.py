@@ -25,7 +25,13 @@ from sqlalchemy.orm import Session
 from app.audit import record_audit
 from app.db import get_db
 from app.deps import client_meta, require_permission
-from app.models import Marca, MarcaClassificacaoNice, Patente, PatenteConteudo
+from app.models import (
+    Marca,
+    MarcaClassificacaoNice,
+    Patente,
+    PatenteConteudo,
+    PatenteDepositante,
+)
 from app.rbac import AccessContext
 from app.schemas.analise import (
     AnalysisReport,
@@ -127,22 +133,38 @@ def _retrieve_patentes(db: Session, req: AnalysisRequest, limit: int = 5) -> lis
     for tok in tokens[:3]:
         conditions.append(PatenteConteudo.titulo.ilike(f"%{tok}%"))
         conditions.append(PatenteConteudo.resumo.ilike(f"%{tok}%"))
-    ids = select(PatenteConteudo.codigo_interno).where(or_(*conditions))
-    rows = (
-        db.execute(
-            select(Patente).where(Patente.codigo_interno.in_(ids)).limit(limit)
-        )
-        .scalars()
-        .all()
+    # The patent title/abstract live on ``patentes_conteudo`` (not on the
+    # bibliographic ``Patente`` row). Join to ``Patente`` so only real patents
+    # are returned, and LEFT JOIN ``PatenteDepositante`` via a correlated
+    # subquery (first depositante) to avoid multiplying rows per patent.
+    depositante = (
+        select(PatenteDepositante.depositante)
+        .where(PatenteDepositante.codigo_interno == PatenteConteudo.codigo_interno)
+        .where(PatenteDepositante.depositante.is_not(None))
+        .order_by(PatenteDepositante.ordem)
+        .limit(1)
+        .scalar_subquery()
     )
+    stmt = (
+        select(
+            PatenteConteudo.titulo,
+            Patente.numero_inpi,
+            PatenteConteudo.numero_inpi,
+            depositante,
+        )
+        .join(Patente, Patente.codigo_interno == PatenteConteudo.codigo_interno)
+        .where(or_(*conditions))
+        .limit(limit)
+    )
+    rows = db.execute(stmt).all()
     return [
         {
-            "titulo": p.titulo,
-            "numero_inpi": p.numero_inpi,
-            "depositante": None,
+            "titulo": titulo,
+            "numero_inpi": numero_inpi or numero_inpi_conteudo,
+            "depositante": nome_depositante,
             "relevancia": 60,
         }
-        for p in rows
+        for titulo, numero_inpi, numero_inpi_conteudo, nome_depositante in rows
     ]
 
 

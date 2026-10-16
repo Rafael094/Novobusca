@@ -41,7 +41,12 @@ class MarcaOut(BaseModel):
     titular_principal: str | None = None
     num_titulares: int = 0
     classificacoes: list[MarcaClassificacao] = []
-    # --- Selective monitoring (section 4) -------------------------------------
+    # Logotipo (imagem) baixado do pePI — ``marcas_logos``. ``tem_logo`` is True
+    # only when a real image was stored; ``logo_status`` mirrors the download
+    # status (OK / SEM_IMAGEM / ERROR / None when not yet processed).
+    tem_logo: bool = False
+    logo_status: str | None = None
+    # Selective monitoring (section 4) -------------------------------------
     # True only when the *current user* keeps this marca under watch. Monitoring
     # is never global/automatic — see ``MarcaMonitoramento``.
     monitorada: bool = False
@@ -63,11 +68,6 @@ class MarcaDetail(MarcaOut):
     classificacoes_viena: list[dict] = []
     # Histórico de publicações (RPI) / despachos — ``marcas_despachos``.
     despachos: list[dict] = []
-    # Logotipo (imagem) baixado do pePI — ``marcas_logos``. ``tem_logo`` is True
-    # only when a real image was stored; ``logo_status`` mirrors the download
-    # status (OK / SEM_IMAGEM / ERROR / None when not yet processed).
-    tem_logo: bool = False
-    logo_status: str | None = None
 
 
 class PatenteOut(BaseModel):
@@ -142,6 +142,30 @@ class MonitoramentoOut(BaseModel):
     numero_inpi: str | None = None
     situacao: str | None = None
     data_deposito: date | None = None
+    # --- Enriched marca data (so the monitoring screen shows *everything*) ---
+    # Datas/lifecycle
+    data_publicacao: date | None = None
+    data_concessao: date | None = None
+    data_vigencia: date | None = None
+    # Características
+    descricao_apresentacao: str | None = None
+    descricao_natureza: str | None = None
+    # Titulares / classificação
+    titulares: list[str] = []
+    titular_principal: str | None = None
+    num_titulares: int = 0
+    # Despachos (histórico RPI) — agregados para exibição
+    total_despachos: int = 0
+    data_ultimo_despacho: date | None = None
+    ultimo_despacho: str | None = None
+    # Vencimento (prazo) — calculado a partir de ``data_vigencia``
+    # ``dias_para_vencer`` é negativo quando já venceu; ``None`` sem vigência.
+    dias_para_vencer: int | None = None
+    vencido: bool = False
+    vence_em_breve: bool = False
+    # Logotipo
+    tem_logo: bool = False
+    logo_status: str | None = None
 
 
 class PaginatedMonitoramentos(BaseModel):

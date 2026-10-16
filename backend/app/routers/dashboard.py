@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.deps import get_access_context
+from app.deps import get_access_context, require_permission
 from app.models import (
     Company,
     Customer,
@@ -20,8 +21,34 @@ from app.models import (
     User,
 )
 from app.rbac import AccessContext
+from app.schemas.crm import BusinessDashboard
+from app.services import crm as crm_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/business", response_model=BusinessDashboard)
+def business_dashboard(
+    months: int = Query(default=12, ge=1, le=24),
+    tenant_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    ctx: AccessContext = Depends(require_permission("CRM_DASHBOARD_VIEW")),
+) -> BusinessDashboard:
+    """Commercial/operational dashboard of the authenticated tenant.
+
+    This is the endpoint the Overview screen consumes. Unlike ``/summary`` it
+    never mixes the global INPI base with the tenant's own performance: every
+    number here comes from records the tenant actually owns (clients, funnel,
+    proposals, follow-ups, monitored PI assets).
+
+    A master admin may inspect all tenants (``tenant_id=None``); an ordinary user
+    is always restricted to their own tenant by ``AccessContext``.
+    """
+    scope = None if ctx.user.is_master_admin else ctx.user.tenant_id
+    if ctx.user.is_master_admin and tenant_id is not None:
+        scope = tenant_id
+    payload = crm_service.build_business_dashboard(db, tenant_id=scope, months=months)
+    return BusinessDashboard.model_validate(payload)
 
 
 def _situacao_group(descricao: str | None, codigo: str | None) -> str:

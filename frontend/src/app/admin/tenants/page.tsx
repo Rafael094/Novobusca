@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import AppShell from "@/components/AppShell";
 import {
   Badge,
   Button,
@@ -112,7 +111,7 @@ export default function TenantsPage() {
 
   if (!isMaster) {
     return (
-      <AppShell>
+      <>
         <Card>
           <Textarea
             label="Acesso restrito"
@@ -120,12 +119,12 @@ export default function TenantsPage() {
             readOnly
           />
         </Card>
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Tenants</h1>
@@ -267,6 +266,6 @@ export default function TenantsPage() {
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
       </Modal>
-    </AppShell>
+    </>
   );
 }
