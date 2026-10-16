@@ -17,6 +17,7 @@ Dados Abertos do INPI (https://dadosabertos.inpi.gov.br/).
 - [Testes](#testes)
 - [Acesso ao sistema](#acesso-ao-sistema)
 - [Docker](#docker)
+- [Deploy (Vercel) e variáveis de ambiente](#deploy-vercel-e-variáveis-de-ambiente)
 - [Estrutura do projeto](#estrutura-do-projeto)
 
 ## Arquitetura
@@ -271,6 +272,52 @@ docker compose up -d
 ```
 
 O volume `pgdata` persiste o PostgreSQL.
+
+## Deploy (Vercel) e variáveis de ambiente
+
+> **Política de segredos:** nenhuma credencial é versionada. `DATABASE_URL` e
+> `DEEPSEEK_API_KEY` vivem **apenas** no `.env` local (git-ignored) e, em
+> produção, nas *Environment Variables* da plataforma de deploy.
+
+### Local
+
+1. `Copy-Item .env.example .env` (na raiz do projeto).
+2. Preencha **apenas no `.env`**:
+   - `DATABASE_URL` (formato `postgresql+psycopg://USER:SENHA@HOST:PORTA/DB`);
+   - `DEEPSEEK_API_KEY` (opcional — vazio desabilita a IA com HTTP 503).
+
+O arquivo `.env` **nunca** é commitado/pushado (`git check-ignore -v .env` confirma).
+
+### Vercel
+
+Configure as variáveis em **Project → Settings → Environment Variables**
+(aplique a Production, Preview e Development conforme necessário):
+
+| Variável | Escopo | Observação |
+|---|---|---|
+| `DATABASE_URL` | Servidor | URL SQLAlchemy completa. Use o host/credenciais reais do seu PostgreSQL. |
+| `DEEPSEEK_API_KEY` | Servidor | Opcional. Sem ela, a análise de IA responde 503. |
+| `ENVIRONMENT` | Servidor | Use algo ≠ `local` (ex.: `production`) em produção — ver nota abaixo. |
+| `JWT_SECRET` | Servidor | **Obrigatório** em produção: ≥ 32 caracteres, diferente de `JWT_REFRESH_SECRET`. |
+| `JWT_REFRESH_SECRET` | Servidor | **Obrigatório** em produção: ≥ 32 caracteres, diferente de `JWT_SECRET`. |
+| `MASTER_ADMIN_EMAIL` | Servidor | Domínio real (TLD `.local` é recusado). |
+| `MASTER_ADMIN_PASSWORD` | Servidor | Trocar o valor de exemplo. |
+| `CORS_ORIGINS` | Servidor | Domínio do frontend na Vercel (ex.: `https://seu-app.vercel.app`). |
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend | URL pública do backend (ex.: `https://sua-api.exemplo`). |
+
+> **Importante:** com `ENVIRONMENT` ≠ `local` (ex.: `production`), o backend
+> **recusa iniciar** enquanto `JWT_SECRET` / `JWT_REFRESH_SECRET` /
+> `MASTER_ADMIN_PASSWORD` ainda tiverem os valores de exemplo, se os dois
+> segredos JWT forem iguais, ou se um deles tiver menos de 32 caracteres
+> (validação em `backend/app/config.py`).
+
+> **Atenção (arquitetura):** a Vercel hospeda o **frontend Next.js**. O
+> **backend FastAPI** é um processo persistente de longa duração (connection
+> pool do PostgreSQL, `uvicorn`) e **não roda** na Vercel. Para publicar o
+> frontend na Vercel, hospede a API em um serviço que suporte processos
+> persistentes (VM, container, Render, Railway, Fly.io, etc.) e aponte
+> `NEXT_PUBLIC_API_BASE_URL` para ela. Os segredos `DATABASE_URL` e
+> `DEEPSEEK_API_KEY` pertencem ao serviço que roda o backend.
 
 ## Estrutura do projeto
 

@@ -1,7 +1,14 @@
 # Environment
 .env
 .env.local
+.env.*.local
 *.env
+
+# Vercel
+.vercel
+.vercel/**
+frontend/.vercel
+frontend/.vercel/**
 
 # Python
 __pycache__/
@@ -40,3 +47,7 @@ Thumbs.db
 backend/backend.pid
 *.tsbuildinfo
 frontend/tsconfig.tsbuildinfo
+
+# Runtime data (documents uploaded during local runs/tests)
+backend/var/
+

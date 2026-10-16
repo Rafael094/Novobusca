@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     environment: str = Field(default="local", alias="ENVIRONMENT")
 
     # --- Database -----------------------------------------------------------
+    # No credentials or hosts are hardcoded here: the real value always comes
+    # from the environment (local .env or, in deploy, the platform's env vars).
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@localhost:5432/intelliinpi_app",
         alias="DATABASE_URL",
