@@ -39,6 +39,8 @@ class IngestionConfig:
     data_dir: Path
     inpi_base_url: str
     pePI_base_url: str = "https://busca.inpi.gov.br/pePI"
+    # Portal das Revistas (RPI) — publicação semanal de terça-feira.
+    rpi_base_url: str = "https://revistas.inpi.gov.br"
     http_timeout_seconds: int = 120
     http_retries: int = 4
     chunk_size: int = 50_000
@@ -46,6 +48,9 @@ class IngestionConfig:
     user_agent: str = "IntelliINPI-Ingestion/1.0 (+https://localhost)"
     logo_concurrency: int = 4
     logo_delay_seconds: float = 0.15
+    # Petições do pePI (página de detalhe) — knobs separados dos logotipos.
+    pepi_concurrency: int = 4
+    pepi_delay_seconds: float = 0.25
 
     @property
     def psycopg_dsn(self) -> str:
@@ -69,6 +74,11 @@ class IngestionConfig:
     def logos_dir(self) -> Path:
         """Where marca logotipo images are stored on disk."""
         return self.data_dir / "raw" / "marcas" / "logos"
+
+    @property
+    def rpi_dir(self) -> Path:
+        """Where downloaded RPI editions (weekly ZIPs) are kept on disk."""
+        return self.data_dir / "raw" / "rpi"
 
     @property
     def reports_dir(self) -> Path:
@@ -98,6 +108,10 @@ def load_config() -> IngestionConfig:
         os.environ.get("INPI_PEPI_BASE_URL"),
         default="https://busca.inpi.gov.br/pePI",
     )
+    rpi_base_url = _first(
+        os.environ.get("INPI_RPI_BASE_URL"),
+        default="https://revistas.inpi.gov.br",
+    )
 
     # Resolve the data dir relative to the repository root (project root), not
     # the current working directory, so CLI and server both land in the same spot.
@@ -111,12 +125,15 @@ def load_config() -> IngestionConfig:
         data_dir=data_path,
         inpi_base_url=base_url.rstrip("/"),
         pePI_base_url=pepi_base_url.rstrip("/"),
+        rpi_base_url=rpi_base_url.rstrip("/"),
         http_timeout_seconds=int(os.environ.get("INPI_HTTP_TIMEOUT", "120")),
         http_retries=int(os.environ.get("INPI_HTTP_RETRIES", "4")),
         chunk_size=int(os.environ.get("INPI_IMPORT_CHUNK_SIZE", "50000")),
         verify_ssl=os.environ.get("INPI_VERIFY_SSL", "true").lower() != "false",
         logo_concurrency=int(os.environ.get("INPI_LOGO_CONCURRENCY", "4")),
         logo_delay_seconds=float(os.environ.get("INPI_LOGO_DELAY", "0.15")),
+        pepi_concurrency=int(os.environ.get("INPI_PEPI_CONCURRENCY", "4")),
+        pepi_delay_seconds=float(os.environ.get("INPI_PEPI_DELAY", "0.25")),
     )
     return cfg
 

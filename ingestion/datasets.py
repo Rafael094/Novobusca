@@ -12,6 +12,11 @@ Propriedade Industrial).
 The pipeline currently focuses on **Marcas** and **Patentes** (the two modules
 exposed by the application), but the catalog is intentionally declarative so new
 datasets can be added without touching the pipeline code.
+
+The ``rpi`` (Revista da Propriedade Industrial) is **not** a bulk dataset here:
+it is published weekly and consumed as a *delta* by ``ingestion.rpi`` (which
+updates ``marcas_despachos``/``patentes_despachos`` directly from the edition's
+XML/TXT), so it deliberately has no :class:`DatasetSpec`.
 """
 
 from __future__ import annotations

@@ -59,13 +59,119 @@ services:
       retries: 5
       start_period: 60s
 
-    # Migrations + seed run once before the server starts, then uvicorn keeps
-    # the long-lived process (connection pool) alive — the whole reason this
-    # backend cannot be serverless.
+    # Migrations + índices + seed rodam uma vez antes de o servidor subir; depois
+    # uvicorn mantém o processo de longa duração (connection pool) vivo — a razão
+    # de este backend não poder ser serverless.
+    #
+    # `app.db_indexes` é a rede de segurança dos índices: as tabelas do INPI são
+    # carregadas em massa FORA do Alembic, então um banco recriado voltava a
+    # fazer Seq Scan de 6,6 M de linhas (~76 s por busca). O passo é idempotente
+    # (cria só o que falta), roda em ~1 s quando já está tudo no lugar e é
+    # tolerante a falha (`|| true`: um índice problemático nunca impede a API de
+    # subir — o erro fica no log e é retomado no próximo deploy).
     command: >
       sh -c "alembic upgrade head &&
+             { python -m app.db_indexes || true; } &&
              python -m app.seed &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Worker de PETIÇÕES do pePI (documentos GRU).
+  #
+  # As petições de um processo não existem nos CSVs de dados abertos: só na
+  # aplicação de consulta pePI. Este container faz login ANÔNIMO, lê a página de
+  # detalhe de cada marca (por `codigo_interno`) e grava em `marcas_peticoes` /
+  # `marcas_pepi_sync`. Fica em container próprio para não competir com a API e
+  # não expõe porta nenhuma.
+  #
+  # Lote em massa por apresentação (Mista/Figurativa — onde há mais processos com
+  # imagem): cada ciclo drena a fila `PENDING` (o que alguém abriu na tela), busca
+  # um lote, dorme e recomeça. O `ON CONFLICT`/status terminal em
+  # `marcas_pepi_sync` garante resume: cada marca é buscada uma vez só.
+  #
+  # Ajuste o volume com os envs INPI_PEPI_* (ou nas flags do `command`). Para
+  # pausar sem derrubar a stack: `docker compose -f docker-compose.prod.yml stop peticoes`.
+  # ---------------------------------------------------------------------------
+  peticoes:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    image: intelliinpi-peticoes:latest
+    container_name: intelliinpi_peticoes
+    restart: unless-stopped
+
+    # Mesmos segredos/URL do backend (DATABASE_URL aponta para o PostgreSQL do
+    # host via host.docker.internal — ver extra_hosts).
+    env_file:
+      - ./backend/.env
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    environment:
+      INPI_PEPI_CONCURRENCY: "2"
+      INPI_PEPI_DELAY: "0.25"
+
+    command: >
+      sh -c "while true; do
+               python -m ingestion.peticoes
+                 --apresentacao Mista --apresentacao Figurativa
+                 --limite 2000 --concorrencia 2 --delay 0.25 || true;
+               sleep 300;
+             done"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Worker da RPI (Revista da Propriedade Industrial) — atualização SEMANAL de
+  # marcas e patentes.
+  #
+  # A RPI sai toda terça-feira e traz, por seção, os despachos daquela semana.
+  # Os CSVs de dados abertos são snapshots: reprocessá-los toda semana custaria
+  # ~11 GB de download + recarga total das tabelas. Este container faz só o DELTA:
+  # descobre a edição mais recente, baixa o ZIP em /txt/, parseia (XML de Marcas,
+  # TXT INID de Patentes) e grava os despachos novos em
+  # `marcas_despachos`/`patentes_despachos`, registrando o estado em `inpi_rpi`.
+  #
+  # Idempotente em duas camadas: edição já PROCESSED é pulada (nada é baixado) e
+  # o INSERT ignora despachos já presentes. O laço é raro e barato — uma consulta
+  # de descoberta por seção a cada ciclo. Para pausar sem derrubar a stack:
+  # `docker compose -f docker-compose.prod.yml stop rpi`.
+  # ---------------------------------------------------------------------------
+  rpi:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    image: intelliinpi-rpi:latest
+    container_name: intelliinpi_rpi
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      # Mesmo DATA_DIR da API: os ZIPs semanais ficam em data/raw/rpi e podem ser
+      # auditados/retomados (raw_path/sha256 são registrados em inpi_rpi).
+      - api_data:/app/data
+
+    command: >
+      sh -c "while true; do
+               python -m ingestion.rpi --ultimas 2 --dias 21 || true;
+               sleep 21600;
+             done"
 
     logging:
       driver: json-file

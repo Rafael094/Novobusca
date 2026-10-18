@@ -68,6 +68,13 @@ class MarcaDetail(MarcaOut):
     classificacoes_viena: list[dict] = []
     # Histórico de publicações (RPI) / despachos — ``marcas_despachos``.
     despachos: list[dict] = []
+    # Petições (documentos GRU) — ``marcas_peticoes``. Não vêm dos dados
+    # abertos: o worker ``ingestion.peticoes`` as busca no pePI. Os campos
+    # ``peticoes_status``/``peticoes_sincronizado_em`` vêm de ``marcas_pepi_sync``
+    # e permitem à UI distinguir "sem petições" de "ainda não sincronizado".
+    peticoes: list[dict] = []
+    peticoes_status: str | None = None
+    peticoes_sincronizado_em: datetime | None = None
 
 
 class PatenteOut(BaseModel):

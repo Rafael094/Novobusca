@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -25,6 +26,8 @@ from app.models import (
     MarcaDespacho,
     MarcaLogo,
     MarcaMonitoramento,
+    MarcaPepiSync,
+    MarcaPeticao,
 )
 from app.rbac import AccessContext
 from app.schemas.search import (
@@ -588,6 +591,17 @@ def get_marca(
     logo = db.execute(
         select(MarcaLogo).where(MarcaLogo.codigo_interno == codigo_interno)
     ).scalar_one_or_none()
+    peticoes = db.execute(
+        select(MarcaPeticao)
+        .where(MarcaPeticao.codigo_interno == codigo_interno)
+        .order_by(
+            MarcaPeticao.data_protocolo.desc().nullslast(),
+            MarcaPeticao.protocolo.desc(),
+        )
+    ).scalars().all()
+    pepi_sync = db.execute(
+        select(MarcaPepiSync).where(MarcaPepiSync.codigo_interno == codigo_interno)
+    ).scalar_one_or_none()
 
     # Build from explicit scalar columns (the ORM ``depositantes`` relationship
     # returns model objects that cannot satisfy the ``list[dict]`` schema field).
@@ -683,6 +697,44 @@ def get_marca(
     ]
     detail.logo_status = logo.status if logo else None
     detail.tem_logo = bool(logo and logo.status == "OK")
+    detail.peticoes = [
+        {
+            "protocolo": p.protocolo,
+            "data_protocolo": p.data_protocolo,
+            "codigo_servico": p.codigo_servico,
+            "descricao_servico": p.descricao_servico,
+            "cliente": p.cliente,
+            "pagamento_conciliado": p.pagamento_conciliado,
+            "banco_codigo": p.banco_codigo,
+            "banco_nome": p.banco_nome,
+            "data_pagamento": p.data_pagamento,
+            "valor_pagamento": (
+                float(p.valor_pagamento) if p.valor_pagamento is not None else None
+            ),
+            "delivery": p.delivery,
+            "data_delivery": p.data_delivery,
+            "tem_imagem": p.tem_imagem,
+        }
+        for p in peticoes
+    ]
+    detail.peticoes_status = pepi_sync.status if pepi_sync else None
+    detail.peticoes_sincronizado_em = pepi_sync.sincronizado_em if pepi_sync else None
+
+    # Enfileira a marca para o worker do pePI quando ainda não há linha de sync.
+    # É um best-effort (não bloqueia a resposta e nunca chama o INPI aqui): o
+    # worker drena a fila PENDING antes do lote em massa. A resposta já reflete o
+    # enfileiramento (status "PENDING") para a UI mostrar "sincronizando…".
+    if pepi_sync is None:
+        try:
+            db.execute(
+                pg_insert(MarcaPepiSync)
+                .values(codigo_interno=codigo_interno, status="PENDING")
+                .on_conflict_do_nothing(index_elements=["codigo_interno"])
+            )
+            db.commit()
+            detail.peticoes_status = "PENDING"
+        except Exception:  # noqa: BLE001 - enfileirar é opcional, nunca falha a leitura
+            db.rollback()
     return detail
 
 

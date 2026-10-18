@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<revista numero="2910" data="13/10/2026">
+  <processo numero="922437041" data-deposito="12/01/2012" data-concessao="07/05/2013" data-vigencia="07/05/2023">
+    <despachos>
+      <despacho codigo="IPAS158" nome="Concessão de registro"/>
+    </despachos>
+    <titulares>
+      <titular nome-razao-social="ISABELA LIMA BRAZ GUEDES" pais="BR" uf="RJ"/>
+    </titulares>
+    <marca apresentacao="Mista" natureza="De Produto">
+      <nome>MAGU</nome>
+    </marca>
+    <classes-vienna edicao="4">
+      <classe-vienna codigo="26.4.7"/>
+    </classes-vienna>
+    <classe-nice codigo="30">
+      <especificacao>Confeitos; bolo preparado para consumo final, confeitado ou não.</especificacao>
+    </classe-nice>
+  </processo>
+  <processo numero="939393107" data-deposito="05/03/2021">
+    <despachos>
+      <despacho codigo="IPAS009" nome="Publicação de pedido de registro para oposição (exame formal concluído)">
+        <texto-complementar>Imagem da Marca alterada.</texto-complementar>
+      </despacho>
+      <despacho codigo="IPAS423" nome="Notificação de oposição"/>
+    </despachos>
+    <titulares>
+      <titular nome-razao-social="OUTRA EMPRESA LTDA" pais="BR" uf="SP"/>
+      <titular nome-razao-social="SEGUNDA TITULAR S.A." pais="BR" uf="MG"/>
+    </titulares>
+    <marca apresentacao="Nominativa" natureza="De Serviço">
+      <nome>MAGU</nome>
+    </marca>
+  </processo>
+  <processo numero="999999999">
+    <despachos>
+      <despacho codigo="IPAS085" nome="Pedido definitivamente arquivado"/>
+    </despachos>
+  </processo>
+</revista>

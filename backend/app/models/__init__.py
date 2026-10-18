@@ -114,6 +114,8 @@ from app.models.marcas import (
     MarcaDepositante,
     MarcaDespacho,
     MarcaLogo,
+    MarcaPepiSync,
+    MarcaPeticao,
 )
 from app.models.patentes import (
     Patente,
@@ -198,6 +200,8 @@ __all__ = [
     "MarcaClassificacaoViena",
     "MarcaDespacho",
     "MarcaLogo",
+    "MarcaPeticao",
+    "MarcaPepiSync",
     # patentes
     "Patente",
     "PatenteConteudo",

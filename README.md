@@ -234,6 +234,62 @@ pePI (`busca.inpi.gov.br`) por sessão anônima:
 > HTTP) e `--force` para pular o preflight. Se o TLS for o problema, aguarde e
 > tente de novo mais tarde ou rode de outra rede/VPN.
 
+### Petições das marcas (pePI)
+
+As **petições** (documentos GRU: protocolo, data, serviço, cliente, delivery)
+também **não** vêm nos CSVs de dados abertos — só na página de detalhe do pePI.
+O worker `ingestion.peticoes` faz o mesmo login anônimo, lê o detalhe de cada
+processo e grava em `marcas_peticoes` (progresso em `marcas_pepi_sync`, o que
+garante resume e retomada):
+
+```powershell
+# (da raiz: intelliinpi) diagnóstico de rede, sem tocar no banco
+.\backend\.venv\Scripts\python.exe -m ingestion.peticoes --diagnostico
+
+# lote por apresentação (Mista/Figurativa), com resume automático
+.\backend\.venv\Scripts\python.exe -m ingestion.peticoes --apresentacao Mista --apresentacao Figurativa --limite 2000
+
+# um processo específico
+.\backend\.venv\Scripts\python.exe -m ingestion.peticoes --codigos 4482935
+
+# re-sincroniza o que já foi baixado há mais de 30 dias (novas petições surgem)
+.\backend\.venv\Scripts\python.exe -m ingestion.peticoes --dias 30
+```
+
+A página de detalhe também alimenta uma **fila**: ao abrir uma marca na tela, o
+backend enfileira o `codigo_interno` como `PENDING` e o worker o drena antes do
+lote em massa. Em produção isso roda sozinho, em container próprio (serviço
+`peticoes` do `docker-compose.prod.yml`) — ver
+`docs/DEPLOY_ORACLE_VERCEL.md` §5.2.
+
+### Atualização semanal — RPI (marcas e patentes)
+
+A **RPI** (Revista da Propriedade Industrial) sai toda **terça-feira** com os
+despachos da semana. O worker `ingestion.rpi` faz só o **delta semanal** (em vez
+de rebaixar ~11 GB de CSVs e recarregar as tabelas): descobre a edição mais
+recente no portal das Revistas, baixa o ZIP de texto (`/txt/`), parseia (XML para
+Marcas, TXT INID para Patentes), casa o processo com o `codigo_interno` que já
+temos e grava os despachos novos em `marcas_despachos`/`patentes_despachos`,
+registrando o estado em `inpi_rpi`:
+
+```powershell
+# (da raiz: intelliinpi) conectividade com o portal, sem tocar no banco
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --diagnostico
+
+# últimas edições de marcas + patentes
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi
+
+# backfill de 4 edições / uma seção só / reprocessar
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --ultimas 4
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao patentes
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao marcas --force
+```
+
+Idempotente em duas camadas (edição `PROCESSED` é pulada; `INSERT` com
+anti-join), então pode repetir à vontade. Em produção roda sozinho, em container
+próprio (serviço `rpi` do `docker-compose.prod.yml`) — ver
+`docs/DEPLOY_ORACLE_VERCEL.md` §5.3.
+
 Relatório final: `reports/INPI_IMPORT_REPORT.md`
 
 ## Testes

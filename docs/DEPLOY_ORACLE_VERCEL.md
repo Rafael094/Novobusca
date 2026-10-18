@@ -257,8 +257,9 @@ cd /opt/intelliinpi
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-O comando do container roda as migrations e o seed antes de iniciar o servidor
-(`alembic upgrade head && python -m app.seed && uvicorn ...`).
+O comando do container roda, antes de iniciar o servidor, as migrations, a
+reconciliação dos índices de busca e o seed
+(`alembic upgrade head && python -m app.db_indexes && python -m app.seed && uvicorn ...`).
 
 Acompanhe e valide:
 
@@ -272,3 +273,252 @@ curl -s http://127.0.0.1:8000/api/health
 
 Se o health check falhar, quase sempre é o `DATABASE_URL` (host, senha sem
 percent-encoding) ou `ENVIRONMENT=production` com segredos fracos.
+
+---
+
+## 5.1 Índices de busca — automáticos em todo deploy
+
+As tabelas do INPI (`marcas` com ~6,6 milhões de linhas, `patentes` e as tabelas
+de relacionamento) são carregadas em massa pelo pipeline de ingestão, **fora do
+Alembic**. Sem os índices de busca, cada consulta virava um `Seq Scan` da tabela
+inteira: uma busca exata por nome levava **~76 s**; com índice, ~1 ms.
+
+O passo `python -m app.db_indexes` (`backend/app/db_indexes.py`) fecha esse
+buraco: ele carrega o manifesto dos índices que devem existir e, **a cada
+deploy**, cria apenas o que estiver faltando. Um banco recriado, um restore ou
+um índice apagado à mão voltam ao normal no próximo deploy, sem intervenção.
+
+Propriedades (e por que é seguro deixar isso no caminho de subida):
+
+- **idempotente** — quando já está tudo no lugar leva ~1 s (só consulta o catálogo);
+- **comparação por definição** — um índice equivalente com nome herdado não gera
+  duplicata; um índice com o nome esperado mas definição diferente é apenas
+  *reportado* como conflito (ele nunca apaga nem substitui nada);
+- **um índice que falha não derruba o deploy** — a API sobe de qualquer forma e
+  o erro aparece no log (o índice é retomado no próximo deploy);
+- **uma execução por vez** — *advisory lock* do PostgreSQL (evita dois containers
+  reconciliando em paralelo, causa dos erros `duplicate key ... "pg_class_relname_nsp_index"`);
+- **`lock_timeout` curto** — se o índice não conseguir o lock, ele é adiado em vez
+  de segurar a subida da API.
+
+O log do deploy mostra exatamente o que aconteceu:
+
+```bash
+docker compose -f docker-compose.prod.yml logs api | grep db_indexes
+# "reconciliando índices (186 no manifesto, timeout por índice: sem limite)"
+# "índice criado em 42.7s"  {"index": "ix_marcas_data_vigencia", "table": "marcas"}
+# "reconciliação de índices concluída em 43.1s: 1 criado(s), 183 já existia(m), 0 conflito(s), 0 tabela(s) ausente(s), 0 erro(s)"
+```
+
+### Rodar/inspecionar à mão
+
+```bash
+cd /opt/intelliinpi
+
+# o que falta (não altera nada)
+docker compose -f docker-compose.prod.yml run --rm --no-deps api python -m app.db_indexes --dry-run
+
+# reconciliar agora, acompanhando o log
+docker compose -f docker-compose.prod.yml run --rm --no-deps api python -m app.db_indexes
+
+# DDL equivalente, para rodar direto no psql (banco que o app não alcança)
+docker compose -f docker-compose.prod.yml run --rm --no-deps api python -m app.db_indexes --emit-sql > /tmp/indices.sql
+```
+
+### Primeira carga de dados (importante)
+
+Os índices são o que torna a **leitura** rápida, mas custam tempo de **escrita**.
+Depois de uma carga em massa nova, deixe o índice ser (re)criado antes de medir
+qualquer coisa — senão o `ANALYZE` não enxerga estatística nova e o planner
+continua preferindo `Seq Scan`:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm --no-deps api python -m app.db_indexes
+```
+
+Se rodar num banco já cheio e o índice pesado (GIN trigram, que serve o filtro
+"Contém") demorar mais que o normal, o deploy não trava: defina
+`INDEX_BUILD_TIMEOUT_SECONDS` no `.env` (ver `backend/.env.prod.example`) e
+construa o índice fora do horário do deploy com `--timeout 0`.
+
+### Validar que o planner está usando os índices
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id FROM marcas WHERE public.fold(elemento_nominativo) = public.fold('Magu');
+-- Index Scan using ix_marcas_elemento_nominativo_fold (esperado ~1 ms)
+
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id FROM marcas WHERE elemento_nominativo ILIKE '%magu%';
+-- Bitmap Index Scan on ix_marcas_elemento_nominativo_trgm (esperado < 1 s)
+```
+
+Os índices das tabelas de **aplicativo** (RBAC, NIT, CRM...) continuam sendo
+criados pelo Alembic (`alembic upgrade head`); o manifesto inclui esses nomes
+apenas como rede de segurança.
+
+---
+
+## 5.2 Worker de petições (pePI) — container próprio
+
+As **petições** de um processo de marca (documentos GRU: protocolo, data,
+serviço, cliente, delivery) **não** existem nos CSVs de dados abertos: só na
+aplicação de consulta pePI (`busca.inpi.gov.br`), atrás de uma sessão anônima —
+exatamente como os logotipos (`ingestion.logos`).
+
+O worker `ingestion.peticoes` faz o login anônimo, lê a página de detalhe de cada
+marca (`MarcasServletController?Action=detail&CodPedido=<codigo_interno>`),
+extrai as petições e grava em `marcas_peticoes`, registrando o progresso em
+`marcas_pepi_sync`. Ele roda em **container próprio** (serviço `peticoes` do
+`docker-compose.prod.yml`, mesmo `.env` e mesmo PostgreSQL do host) para não
+competir com a API.
+
+### Como ele roda
+
+Sobe junto com a stack e fica em loop:
+
+```bash
+cd /opt/intelliinpi
+docker compose -f docker-compose.prod.yml up -d --build   # sobe api + peticoes + rpi
+docker compose -f docker-compose.prod.yml logs -f peticoes
+```
+
+Cada ciclo drena a fila `PENDING` (marcas que alguém abriu na tela — o endpoint
+de detalhe as enfileira), busca um lote de `Mista`/`Figurativa` e dorme 5 min. O
+status terminal em `marcas_pepi_sync` garante o **resume**: cada marca é buscada
+uma vez só, mesmo reiniciando o worker.
+
+- **Pausar sem derrubar a stack:** `docker compose -f docker-compose.prod.yml stop peticoes`
+- **Volume/ritmo:** flags do `command` ou os envs `INPI_PEPI_CONCURRENCY` /
+  `INPI_PEPI_DELAY` (ver `backend/.env.prod.example`).
+- **Atualizar periodicamente:** acrescente `--dias 30` ao comando para
+  re-sincronizar o que já foi baixado (novas petições GRU surgem com o tempo).
+
+### Rodar à mão (um processo específico)
+
+```bash
+cd /opt/intelliinpi
+
+# diagnóstico de rede (DNS/TCP/TLS/HTTP), sem tocar no banco
+docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+  python -m ingestion.peticoes --diagnostico
+
+# um código específico
+docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+  python -m ingestion.peticoes --codigos 4482935 --limite 1
+
+# inspecionar a fila/estado (o Postgres roda nativo na VM, no container inpi-postgres)
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "SELECT status, count(*) FROM marcas_pepi_sync GROUP BY status;"
+```
+
+> **Fonte instável.** O `busca.inpi.gov.br` é um servlet legado com TLS frágil (o
+> mesmo preflight que protege os logotipos vale aqui). Se o host cair no meio de
+> um lote, o ciclo termina e recomeça: nada é perdido, o que faltou fica
+> `PENDING`/`ERROR` e é retomado depois.
+
+> **Logotipos são outro worker.** O serviço `peticoes` **não** baixa imagens —
+> isso continua em `ingestion.logos` (a imagem aparece na tela via
+> `marcas_logos`). Para rodá-lo no container de ingestão:
+>
+> ```bash
+> docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+>   python -m ingestion.logos --apresentacao Mista --apresentacao Figurativa
+> ```
+
+## 5.3 Worker da RPI — atualização **semanal** de marcas e patentes
+
+A **RPI** (Revista da Propriedade Industrial) é publicada toda **terça-feira** e
+traz, por seção, os *despachos* daquela semana (exigências, oposições,
+deferimento, indeferimento, concessão, arquivamento, ...). Os CSVs de dados
+abertos são *snapshots*: reprocessá-los toda semana custaria ~11 GB de download e
+a recarga total das tabelas (inviável com o disco atual). Por isso o worker
+`ingestion.rpi` faz só o **delta semanal**, direto na fonte oficial das revistas.
+
+Ele roda em **container próprio** (serviço `rpi` do `docker-compose.prod.yml`,
+mesmo `.env`, mesmo PostgreSQL do host e o mesmo volume `api_data` da API).
+
+### O que ele faz (por seção: `marcas` e `patentes`)
+
+1. **descobre** a edição mais recente via JSON —
+   `GET {base}/rpi/busca/data?revista.tipoRevista.id=<id>` (marcas = 5,
+   patentes = 6);
+2. **baixa** o ZIP de texto — `GET {base}/txt/<nomeArquivoEscritorio>` — e o
+   guarda em `data/raw/rpi` (resume/auditoria; `raw_path`/`sha256` vão para
+   `inpi_rpi`);
+3. **parseia** o conteúdo: XML para **Marcas** (`<revista><processo>...`,
+   `<despacho codigo="IPAS###">`) e TXT INID para **Patentes** (`(Cd)`, `(21)`,
+   `(98)`, ...);
+4. **casa** o número do processo com o `codigo_interno` que já temos
+   (`marcas` por `numero_inpi`; `patentes` pelo conjunto de dígitos, já que o
+   formato do número varia). Processo que ainda não está no banco é **ignorado**
+   — ele entra pelo dump de dados abertos;
+5. **grava** os despachos novos em `marcas_despachos`/`patentes_despachos` e
+   registra o estado da edição em `inpi_rpi`
+   (`metadata.sections.<secao> = {status, processos, casados, despachos, ...}`).
+
+> **Escopo.** O worker **acrescenta** o histórico de publicações (despachos). Ele
+> **não** reescreve a situação/bibliografia da marca (`descricao_situacao` etc.):
+> o vocabulário de situação do dado aberto não é 1:1 com o código do despacho, e
+> um mapeamento errado corromperia o dado. Isso continua vindo do dump.
+
+### Como ele roda
+
+Sobe junto com a stack e fica em loop (um ciclo a cada 6 h):
+
+```bash
+cd /opt/intelliinpi
+docker compose -f docker-compose.prod.yml up -d --build   # api + peticoes + rpi
+docker compose -f docker-compose.prod.yml logs -f rpi
+```
+
+- **Pausar sem derrubar a stack:** `docker compose -f docker-compose.prod.yml stop rpi`
+- **Fonte alternativa:** env `INPI_RPI_BASE_URL` (padrão `https://revistas.inpi.gov.br`).
+
+### Idempotência e resume
+
+Duas camadas, então pode rodar quantas vezes quiser que nada duplica:
+
+- a edição já marcada como `PROCESSED` em `inpi_rpi` é **pulada** (nada é
+  baixado de novo);
+- o `INSERT` usa anti-join por `(codigo_interno, numero_rpi, codigo_despacho,
+  complemento_despacho)` — um despacho que o CSV aberto já trouxe não é
+  reproduzido.
+
+O ZIP é salvo em `data/raw/rpi`; se o download cair no meio, o `.part` não é
+promovido e o próximo ciclo tenta de novo.
+
+### Rodar à mão / inspecionar
+
+```bash
+cd /opt/intelliinpi
+
+# conectividade com o portal das Revistas (sem tocar no banco)
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi --diagnostico
+
+# backfill das 4 últimas edições das duas seções
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi --ultimas 4
+
+# uma seção só / reprocessar
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi --secao marcas --force
+
+# o que já foi processado (o Postgres roda nativo na VM, no container inpi-postgres)
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "SELECT number, status, metadata->'sections' FROM inpi_rpi ORDER BY number DESC LIMIT 5;"
+
+# quanto entrou de cada seção
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "SELECT numero_rpi, count(*) FROM marcas_despachos GROUP BY 1 ORDER BY 1 DESC LIMIT 5;"
+```
+
+> **Fonte instável.** O `revistas.inpi.gov.br` entra em manutenção de tempos em
+> tempos (responde **503** com uma página de manutenção). O worker pré-checa a
+> conectividade e, se o portal estiver fora, sai limpo sem marcar nada como
+> `SEM_DADOS` — o próximo ciclo (6 h depois) tenta de novo. O mesmo vale para uma
+> falha no meio do processamento: a edição fica `FAILED` em `inpi_rpi` e é
+> retomada no ciclo seguinte (idempotente).
+
+

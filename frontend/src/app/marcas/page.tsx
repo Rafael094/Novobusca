@@ -661,12 +661,70 @@ function MarcaDetailView({ marca }: { marca: MarcaDetail }) {
         </SectionBlock>
       )}
 
-      {/* Petições — dataset não importado (relatório §10) */}
-      <SectionBlock title="Petições">
-        <NotImportedNote>
-          As petições do processo não estão disponíveis localmente: o dataset de
-          petições de marcas não faz parte dos dados abertos importados.
-        </NotImportedNote>
+      {/* Petições — documentos GRU lidos do pePI pelo worker ingestion.peticoes */}
+      <SectionBlock
+        title={`Petições${
+          marca.peticoes.length > 0 ? ` (${marca.peticoes.length})` : ""
+        }`}
+      >
+        {marca.peticoes.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-600">
+              <thead>
+                <tr className="border-b border-slate-100 text-xs uppercase text-slate-400">
+                  <th className="py-1 pr-3 font-medium">Protocolo</th>
+                  <th className="py-1 pr-3 font-medium">Data</th>
+                  <th className="py-1 pr-3 font-medium">Serviço</th>
+                  <th className="py-1 pr-3 font-medium">Cliente</th>
+                  <th className="py-1 pr-3 font-medium">Pagamento</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {marca.peticoes.map((p, i) => (
+                  <tr key={`${p.protocolo}-${i}`}>
+                    <td className="py-2 pr-3 font-medium text-slate-700">
+                      {p.protocolo}
+                    </td>
+                    <td className="py-2 pr-3">{formatDate(p.data_protocolo)}</td>
+                    <td className="py-2 pr-3">
+                      {p.codigo_servico && (
+                        <span className="mr-1 rounded bg-brand-50 px-1 text-xs font-medium text-brand-700">
+                          {p.codigo_servico}
+                        </span>
+                      )}
+                      {p.descricao_servico && (
+                        <span className="text-xs text-slate-500">
+                          {p.descricao_servico}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3">{p.cliente}</td>
+                    <td className="py-2 pr-3 text-xs text-slate-500">
+                      {p.pagamento_conciliado ? "Conciliado" : "—"}
+                      {p.valor_pagamento != null
+                        ? ` · ${p.valor_pagamento.toLocaleString("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          })}`
+                        : ""}
+                      {p.banco_nome ? ` · ${p.banco_nome}` : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <NotImportedNote>
+            {marca.peticoes_status === null ||
+            marca.peticoes_status === undefined ||
+            marca.peticoes_status === "PENDING"
+              ? "Petições ainda não sincronizadas: a marca entrou na fila do worker do pePI (ingestion.peticoes) e aparecerá aqui após a próxima execução."
+              : marca.peticoes_status === "ERROR"
+                ? "Falha ao sincronizar as petições desta marca no pePI; será re-tentado."
+                : "O pePI não retornou petições (documentos GRU) para este processo."}
+          </NotImportedNote>
+        )}
       </SectionBlock>
 
       {/* Histórico de publicações (RPI) / despachos — MARCAS_DESPACHOS.csv */}

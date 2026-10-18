@@ -7,15 +7,18 @@ plus a few normalised columns for search. Keyed by (codigo_interno, numero_inpi)
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -168,3 +171,69 @@ class MarcaLogo(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tentativas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     erro: Mapped[str | None] = mapped_column(Text)
     baixado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MarcaPeticao(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Petições (documentos GRU) de um processo de marca, lidas do pePI.
+
+    **Não** fazem parte dos CSVs de dados abertos: só existem na aplicação de
+    consulta pePI (``busca.inpi.gov.br``), atrás de uma sessão anônima. O worker
+    ``ingestion.peticoes`` lê a página de detalhe
+    (``MarcasServletController?Action=detail&CodPedido=<codigo_interno>``) e
+    grava uma linha por protocolo aqui. ``codigo_interno`` é o mesmo código do
+    processo usado em ``marcas``/``marcas_logos``.
+    """
+
+    __tablename__ = "marcas_peticoes"
+    __table_args__ = (
+        UniqueConstraint(
+            "codigo_interno", "protocolo", name="uq_marcas_peticoes_codigo_protocolo"
+        ),
+        Index("ix_marcas_peticoes_codigo_interno", "codigo_interno"),
+    )
+
+    codigo_interno: Mapped[str] = mapped_column(String(64), nullable=False)
+    numero_inpi: Mapped[str | None] = mapped_column(String(32))
+    protocolo: Mapped[str] = mapped_column(String(32), nullable=False)
+    data_protocolo: Mapped[object | None] = mapped_column(Date)
+    codigo_servico: Mapped[str | None] = mapped_column(String(16))
+    descricao_servico: Mapped[str | None] = mapped_column(Text)
+    cliente: Mapped[str | None] = mapped_column(Text)
+    pagamento_conciliado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    banco_codigo: Mapped[str | None] = mapped_column(String(8))
+    banco_nome: Mapped[str | None] = mapped_column(Text)
+    data_pagamento: Mapped[object | None] = mapped_column(Date)
+    valor_pagamento: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    delivery: Mapped[str | None] = mapped_column(Text)
+    data_delivery: Mapped[object | None] = mapped_column(Date)
+    tem_imagem: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class MarcaPepiSync(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Estado da sincronização das petições de uma marca com o pePI.
+
+    Uma linha por ``codigo_interno``. Serve de fila (``PENDING`` = solicitado,
+    ainda não buscado) e de registro de progresso para o worker resumível:
+    ``OK``/``SEM_DADOS`` são terminais (pulados no resume) e ``ERROR`` é
+    retentável. Espelha o ``status`` de ``marcas_logos``.
+    """
+
+    __tablename__ = "marcas_pepi_sync"
+    __table_args__ = (
+        UniqueConstraint(
+            "codigo_interno", name="uq_marcas_pepi_sync_codigo_interno"
+        ),
+        Index("ix_marcas_pepi_sync_status", "status"),
+    )
+
+    codigo_interno: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    peticoes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    revista: Mapped[str | None] = mapped_column(String(32))
+    dados_atualizados_em: Mapped[object | None] = mapped_column(Date)
+    tentativas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    erro: Mapped[str | None] = mapped_column(Text)
+    sincronizado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

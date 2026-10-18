@@ -109,6 +109,26 @@ export type MarcaDetail = Marca & {
   // real armazenada; `logo_status` reflete o processamento (OK/SEM_IMAGEM/...).
   tem_logo: boolean;
   logo_status: string | null;
+  // Petições (documentos GRU) — não vêm dos dados abertos; o worker
+  // `ingestion.peticoes` as busca no pePI. `peticoes_status` (OK/SEM_DADOS/
+  // PENDING/ERROR) distingue "sem petições" de "ainda não sincronizado".
+  peticoes: Array<{
+    protocolo: string;
+    data_protocolo?: string | null;
+    codigo_servico?: string | null;
+    descricao_servico?: string | null;
+    cliente?: string | null;
+    pagamento_conciliado?: boolean;
+    banco_codigo?: string | null;
+    banco_nome?: string | null;
+    data_pagamento?: string | null;
+    valor_pagamento?: number | null;
+    delivery?: string | null;
+    data_delivery?: string | null;
+    tem_imagem?: boolean;
+  }>;
+  peticoes_status: string | null;
+  peticoes_sincronizado_em: string | null;
 };
 
 export type Patente = {

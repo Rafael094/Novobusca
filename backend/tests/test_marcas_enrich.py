@@ -318,6 +318,76 @@ def test_detail_defaults_no_logo_when_unprocessed(db, seeded, client):
     assert body["logo_status"] is None
 
 
+def test_detail_carries_peticoes(db, seeded, client):
+    """Petições gravadas pelo worker do pePI aparecem no detalhe, com metadados."""
+    token = _seed(client, db)
+    from datetime import date, datetime, timezone
+
+    from app.models import MarcaPepiSync, MarcaPeticao
+
+    db.add(
+        MarcaPeticao(
+            codigo_interno="c1",
+            numero_inpi="100",
+            protocolo="800210453297",
+            data_protocolo=date(2021, 12, 22),
+            codigo_servico="372",
+            descricao_servico="Primeiro decênio de vigência",
+            cliente="ISABELA LIMA BRAZ GUEDES",
+            pagamento_conciliado=True,
+            banco_codigo="077",
+            banco_nome="Banco Intermedium S.A.",
+            data_pagamento=date(2021, 12, 22),
+            valor_pagamento=298.0,
+            tem_imagem=False,
+        )
+    )
+    db.add(
+        MarcaPepiSync(
+            codigo_interno="c1",
+            status="OK",
+            peticoes_count=1,
+            sincronizado_em=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+
+    body = client.get("/api/marcas/c1", headers=auth_header(token)).json()
+    assert len(body["peticoes"]) == 1
+    p = body["peticoes"][0]
+    assert p["protocolo"] == "800210453297"
+    assert p["data_protocolo"] == "2021-12-22"
+    assert p["codigo_servico"] == "372"
+    assert p["cliente"] == "ISABELA LIMA BRAZ GUEDES"
+    assert p["pagamento_conciliado"] is True
+    assert p["banco_codigo"] == "077"
+    assert p["valor_pagamento"] == 298.0
+    assert body["peticoes_status"] == "OK"
+    assert body["peticoes_sincronizado_em"] is not None
+
+
+def test_detail_enfileira_marca_sem_sync(db, seeded, client):
+    """Abrir uma marca sem sync cria a linha PENDING (fila do worker), sem duplicar."""
+    token = _seed(client, db)
+    from app.models import MarcaPepiSync
+
+    assert db.query(MarcaPepiSync).count() == 0
+
+    resp = client.get("/api/marcas/c3", headers=auth_header(token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["peticoes"] == []
+    assert resp.json()["peticoes_status"] == "PENDING"
+
+    db.expire_all()
+    row = db.query(MarcaPepiSync).filter_by(codigo_interno="c3").one()
+    assert row.status == "PENDING"
+
+    # Um segundo GET encontra a linha existente e não duplica (unique por código).
+    client.get("/api/marcas/c3", headers=auth_header(token))
+    db.expire_all()
+    assert db.query(MarcaPepiSync).filter_by(codigo_interno="c3").count() == 1
+
+
 def test_detail_reports_logo_status(db, seeded, client):
     """tem_logo is only True for status=OK; other statuses flow through."""
     from app.models import MarcaLogo
