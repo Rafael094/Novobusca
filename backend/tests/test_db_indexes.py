@@ -89,3 +89,70 @@ def test_definicoes_criticas_nao_mudaram(nome: str, definicao: str) -> None:
     """Trava a definição das expressões: mudar isso invalida o plano de busca."""
     spec = next(s for s in db_indexes.ALL_INDEXES if s.name == nome)
     assert spec.definition == definicao
+
+
+# --- Índices únicos exigidos pelo `ON CONFLICT` -----------------------------
+
+
+def test_indices_unicos_bem_formados() -> None:
+    nomes = [name for name, _table, _cols in db_indexes.REQUIRED_UNIQUE_INDEXES]
+    assert len(nomes) == len(set(nomes))
+    # a que faltava em produção e derrubava o worker da RPI
+    assert "uq_inpi_rpi_number" in nomes
+    for spec in db_indexes._unique_specs():
+        assert spec.definition.startswith(f"public.{spec.table} USING btree ("), spec.name
+        assert not spec.by_name
+
+
+def test_emit_sql_inclui_os_indices_unicos() -> None:
+    sql = db_indexes._emit_sql()
+    for spec in db_indexes._unique_specs():
+        assert (
+            f'CREATE UNIQUE INDEX IF NOT EXISTS "{spec.name}" ON {spec.definition};'
+            in sql
+        )
+
+
+def test_reconcile_unique_recria_a_constraint_ausente() -> None:
+    """Regressão: o banco de produção estava SEM `uq_inpi_rpi_number`.
+
+    Aqui removemos a constraint de propósito e conferimos que a reconciliação a
+    recria (única e imediata, ou seja, utilizável como árbitro do ON CONFLICT).
+    """
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE inpi_rpi DROP CONSTRAINT IF EXISTS uq_inpi_rpi_number")
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_inpi_rpi_number"))
+        assert (
+            conn.execute(
+                text(
+                    "SELECT 1 FROM pg_class WHERE relname = 'uq_inpi_rpi_number'"
+                )
+            ).scalar()
+            is None
+        )
+
+    summary = db_indexes.Summary()
+    conn = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+    try:
+        db_indexes._reconcile_unique(conn, summary, dry_run=False)
+    finally:
+        conn.close()
+
+    assert "uq_inpi_rpi_number" in summary.created
+    with engine.begin() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT i.indisunique AND i.indimmediate FROM pg_index i "
+                    "JOIN pg_class c ON c.oid = i.indexrelid "
+                    "WHERE c.relname = 'uq_inpi_rpi_number'"
+                )
+            ).scalar()
+            is True
+        )

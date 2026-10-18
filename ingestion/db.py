@@ -318,41 +318,59 @@ def upsert_rpi(
     raw_path: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> None:
+    """Grava/atualiza a linha de controle de uma edição da RPI.
+
+    Usa UPDATE + INSERT em vez de ``ON CONFLICT (number)`` de propósito: o worker
+    também roda fora do deploy (``docker compose run --rm --no-deps rpi ...``),
+    quando o passo ``app.db_indexes`` pode não ter garantido o índice único de
+    ``inpi_rpi.number`` — sem ele o ``ON CONFLICT`` falha com
+    ``InvalidColumnReference``. A conexão é autocommit, então a corrida com outro
+    processo é resolvida refazendo o UPDATE se o INSERT colidir.
+    """
+    updated = """
+        UPDATE inpi_rpi SET
+            edition_date = %(edition_date)s,
+            file_name    = %(file_name)s,
+            file_size    = %(file_size)s,
+            sha256       = %(sha256)s,
+            source_url   = %(source_url)s,
+            status       = %(status)s,
+            raw_path     = %(raw_path)s,
+            metadata     = %(meta)s,
+            updated_at   = %(now)s
+        WHERE number = %(number)s
+    """
+    inserted = """
+        INSERT INTO inpi_rpi
+            (id, number, edition_date, file_name, file_size, sha256,
+             source_url, status, raw_path, metadata, created_at, updated_at)
+        VALUES
+            (%(id)s, %(number)s, %(edition_date)s, %(file_name)s,
+             %(file_size)s, %(sha256)s, %(source_url)s, %(status)s,
+             %(raw_path)s, %(meta)s, %(now)s, %(now)s)
+    """
+    values = {
+        "id": str(uuid.uuid4()),
+        "number": number,
+        "edition_date": edition_date,
+        "file_name": file_name,
+        "file_size": file_size,
+        "sha256": sha256,
+        "source_url": source_url,
+        "status": status,
+        "raw_path": raw_path,
+        "meta": _json(meta),
+        "now": _now(),
+    }
     with cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO inpi_rpi
-                (id, number, edition_date, file_name, file_size, sha256,
-                 source_url, status, raw_path, metadata, created_at, updated_at)
-            VALUES
-                (%(id)s, %(number)s, %(edition_date)s, %(file_name)s,
-                 %(file_size)s, %(sha256)s, %(source_url)s, %(status)s,
-                 %(raw_path)s, %(meta)s, %(now)s, %(now)s)
-            ON CONFLICT (number) DO UPDATE SET
-                edition_date = EXCLUDED.edition_date,
-                file_name = EXCLUDED.file_name,
-                file_size = EXCLUDED.file_size,
-                sha256 = EXCLUDED.sha256,
-                source_url = EXCLUDED.source_url,
-                status = EXCLUDED.status,
-                raw_path = EXCLUDED.raw_path,
-                metadata = EXCLUDED.metadata,
-                updated_at = EXCLUDED.updated_at
-            """,
-            {
-                "id": str(uuid.uuid4()),
-                "number": number,
-                "edition_date": edition_date,
-                "file_name": file_name,
-                "file_size": file_size,
-                "sha256": sha256,
-                "source_url": source_url,
-                "status": status,
-                "raw_path": raw_path,
-                "meta": _json(meta),
-                "now": _now(),
-            },
-        )
+        cur.execute(updated, values)
+        if cur.rowcount:
+            return
+        try:
+            cur.execute(inserted, values)
+        except psycopg.errors.UniqueViolation:
+            # Outro processo criou a mesma edição no meio: o UPDATE dele já valeu.
+            cur.execute(updated, values)
 
 
 def get_rpi(number: str) -> dict[str, Any] | None:

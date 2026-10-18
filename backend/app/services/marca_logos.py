@@ -30,6 +30,7 @@ backend ORM + settings because the backend must not import the standalone
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 import threading
@@ -74,9 +75,15 @@ def _destino(codigo_interno: str, mime: str | None) -> Path:
 
 
 def _rel_arquivo(path: Path) -> str:
-    """Store a path relative to the data dir when possible (portable)."""
+    """Store a path relative to the data dir, always POSIX-style (portable).
+
+    ``as_posix()`` matters: on Windows ``str(Path)`` yields
+    ``raw\\marcas\\logos\\44\\x.jpg``; the very same value read back on Linux is
+    a *single* filename, so the image would look "stored" in ``marcas_logos`` but
+    be unresolvable by the API.
+    """
     try:
-        return str(path.relative_to(settings.data_path))
+        return path.relative_to(settings.data_path).as_posix()
     except ValueError:
         return str(path)
 
@@ -176,14 +183,56 @@ def _load_row(db: Session, codigo_interno: str) -> MarcaLogo | None:
     ).scalar_one_or_none()
 
 
-def _row_file(row: MarcaLogo | None) -> Path | None:
-    """Return the on-disk path for an ``OK`` row that actually exists."""
+def stored_logo_file(row: MarcaLogo | None, codigo_interno: str) -> Path | None:
+    """Return the on-disk path for an ``OK`` row that actually exists.
+
+    Tolerates paths stored with Windows separators (``raw\\marcas\\logos\\44\\x.jpg``):
+    they were written by the worker running on Windows and, read back on Linux,
+    ``Path("raw\\...")`` is a *single* filename. We normalise the separators and,
+    if the relative path still misses, fall back to the canonical shard
+    (``logos/<2 first chars>/<file>``) so an old row keeps working after a
+    restore.
+    """
     if row is None or row.status != OK or not row.arquivo:
         return None
-    path = Path(row.arquivo)
-    if not path.is_absolute():
-        path = (settings.data_path / path).resolve()
-    return path if path.is_file() else None
+
+    salvo = Path(row.arquivo.replace("\\", "/"))
+    candidatos: list[Path] = []
+    if salvo.is_absolute():
+        candidatos.append(salvo)
+    else:
+        candidatos.append((settings.data_path / salvo).resolve())
+        prefixo = (codigo_interno or "")[:2] or "_"
+        candidatos.append((settings.logos_path / prefixo / salvo.name).resolve())
+
+    for caminho in candidatos:
+        if caminho.is_file():
+            return caminho
+    return None
+
+
+# Acima disto a imagem não é embutida no JSON (a UI cai para a rota ``/logo``,
+# que faz streaming). Logotipos do pePI costumam ter ~8 KB.
+_LOGO_MAX_INLINE_BYTES = 512 * 1024
+
+
+def inline_logo_data_uri(path: Path | None, mime: str | None) -> str | None:
+    """``data:image/jpeg;base64,...`` para embutir o logotipo na resposta.
+
+    Usado pelo detalhe da marca, que assim não precisa de uma segunda
+    requisição. ``None`` quando não há arquivo, ele está vazio ou passa de
+    ``_LOGO_MAX_INLINE_BYTES``.
+    """
+    if path is None:
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if not data or len(data) > _LOGO_MAX_INLINE_BYTES:
+        return None
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime or 'image/jpeg'};base64,{encoded}"
 
 
 def _persist(
@@ -310,7 +359,7 @@ def resolve_logo_file(
     when it could not be fetched).
     """
     row = resolve_marca_logo(db, codigo_interno, allow_fetch=allow_fetch)
-    path = _row_file(row)
+    path = stored_logo_file(row, codigo_interno)
     if path is None or row is None:
         return None
     return path, (row.mime or "image/jpeg")

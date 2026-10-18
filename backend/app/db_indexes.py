@@ -30,6 +30,12 @@ Propriedades
 * **Não trava o deploy**: ``lock_timeout`` curto faz um índice que não conseguiu
   o lock ser adiado para o próximo deploy, em vez de pendurar a subida da API.
 
+Além dos índices de busca, o mesmo passo garante os **índices únicos** que o
+código da ingestão exige para `INSERT ... ON CONFLICT` — ver
+`REQUIRED_UNIQUE_INDEXES`. Sem eles a ingestão quebra na primeira gravação com
+`InvalidColumnReference: there is no unique or exclusion constraint matching the
+ON CONFLICT specification` (foi o que aconteceu em produção com `inpi_rpi`).
+
 Uso
 ---
     python -m app.db_indexes                # reconcilia (usado no deploy)
@@ -112,6 +118,23 @@ _INDEXES_SQL = text(
     JOIN pg_class ic ON ic.oid = i.indexrelid
     JOIN pg_namespace n ON n.oid = tc.relnamespace
     WHERE n.nspname = 'public' AND tc.relkind = 'r'
+    """
+)
+
+# Só os índices que podem servir de árbitro para `ON CONFLICT`: únicos e
+# imediatos (`indimmediate = false` é o caso de uma constraint DEFERRABLE, que o
+# PostgreSQL recusa como árbitro).
+_UNIQUE_KEYS_SQL = text(
+    """
+    SELECT tc.relname                     AS table_name,
+           ic.relname                     AS index_name,
+           pg_get_indexdef(i.indexrelid)  AS definition
+    FROM pg_index i
+    JOIN pg_class tc ON tc.oid = i.indrelid
+    JOIN pg_class ic ON ic.oid = i.indexrelid
+    JOIN pg_namespace n ON n.oid = tc.relnamespace
+    WHERE n.nspname = 'public' AND tc.relkind = 'r'
+      AND i.indisvalid AND i.indisready AND i.indisunique AND i.indimmediate
     """
 )
 
@@ -550,6 +573,52 @@ APP_INDEXES: tuple[IndexSpec, ...] = (
 ALL_INDEXES: tuple[IndexSpec, ...] = INPI_INDEXES + APP_INDEXES
 
 
+# ---------------------------------------------------------------------------
+# Índices ÚNICOS exigidos pelo código (`INSERT ... ON CONFLICT`)
+# ---------------------------------------------------------------------------
+#
+# As tabelas do aplicativo são geridas pelo Alembic, que já declara estas
+# constraints desde as respectivas migrations. Mas um banco que veio de um dump
+# antigo pode estar sem elas — e aí a ingestão falha na primeira gravação, mesmo
+# com o schema "funcionando" para leitura:
+#
+#     psycopg.errors.InvalidColumnReference: there is no unique or exclusion
+#     constraint matching the ON CONFLICT specification
+#
+# (aconteceu em produção: `inpi_rpi.number` existia no Alembic mas não no banco).
+# O passo abaixo conserta isso sozinho, em todo deploy, do mesmo jeito que faz
+# com os índices de busca. Criamos um índice ÚNICO (não uma constraint): serve
+# igual como árbitro do `ON CONFLICT` e é idempotente via `IF NOT EXISTS`.
+#
+# Formato: (nome, tabela, colunas).
+REQUIRED_UNIQUE_INDEXES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    # Schema inicial (612d99e9df03) — as que faltavam em produção.
+    ("uq_inpi_dataset_name", "inpi_dataset", ("name",)),
+    ("uq_inpi_checkpoint", "inpi_import_checkpoint", ("dataset_id", "target_table")),
+    ("uq_inpi_rpi_number", "inpi_rpi", ("number",)),
+    # Migrations seguintes (self-heal também, para o caso de um restore antigo).
+    ("uq_marcas_logos_codigo_interno", "marcas_logos", ("codigo_interno",)),
+    (
+        "uq_marcas_peticoes_codigo_protocolo",
+        "marcas_peticoes",
+        ("codigo_interno", "protocolo"),
+    ),
+    ("uq_marcas_pepi_sync_codigo_interno", "marcas_pepi_sync", ("codigo_interno",)),
+)
+
+
+def _unique_specs() -> tuple[IndexSpec, ...]:
+    """`REQUIRED_UNIQUE_INDEXES` como `IndexSpec` (comparados por definição)."""
+    return tuple(
+        IndexSpec(
+            name=name,
+            table=table,
+            definition=f"public.{table} USING btree ({', '.join(columns)})",
+        )
+        for name, table, columns in REQUIRED_UNIQUE_INDEXES
+    )
+
+
 @dataclass
 class Summary:
     """Resultado de uma reconciliação (também usado pelos testes)."""
@@ -774,6 +843,89 @@ def _reconcile(conn: Connection, summary: Summary, *, dry_run: bool) -> None:
             log.error("falha no ANALYZE de %s: %s", table, exc)
 
 
+def _reconcile_unique(
+    conn: Connection, summary: Summary, *, dry_run: bool
+) -> None:
+    """Garante os índices únicos exigidos por ``INSERT ... ON CONFLICT``.
+
+    É o mesmo raciocínio dos índices de busca, aplicado às *constraints*: o
+    schema do banco pode ter divergido do Alembic (restore/dump antigo) e o
+    código passa a falhar em toda gravação. Aqui só criamos o que falta; nunca
+    removemos nada.
+    """
+    tables = {row[0] for row in conn.execute(_TABLES_SQL)}
+
+    # Definido por colunas/expressão: um índice único equivalente com outro nome
+    # já serve de árbitro, então não criamos uma segunda cópia.
+    unique_keys: set[tuple[str, str]] = set()
+    for table, _index_name, definition in conn.execute(_UNIQUE_KEYS_SQL):
+        unique_keys.add((table, normalise(definition)))
+
+    # Todos os índices (mesmo os que não servem): para detectar o nome já ocupado.
+    taken_names: dict[str, str] = {}
+    for _table, index_name, definition, _usable in conn.execute(_INDEXES_SQL):
+        taken_names.setdefault(index_name, definition)
+
+    for spec in _unique_specs():
+        if spec.table not in tables:
+            summary.missing_tables.append(spec.name)
+            log.warning(
+                "tabela ausente; índice único ignorado",
+                extra={"context": {"index": spec.name, "table": spec.table}},
+            )
+            continue
+
+        if (spec.table, normalise(spec.definition)) in unique_keys:
+            summary.existing += 1
+            continue
+
+        if spec.name in taken_names:
+            # Existe com este nome, mas não é único+imediato: não dá para usar em
+            # ON CONFLICT e recriar com o mesmo nome é impossível sem removê-lo.
+            summary.conflicts.append(spec.name)
+            log.warning(
+                "já existe um índice com este nome que NÃO serve de árbitro para "
+                "ON CONFLICT (precisa ser único e imediato); nada foi criado — %s",
+                taken_names[spec.name],
+                extra={"context": {"index": spec.name, "table": spec.table}},
+            )
+            continue
+
+        statement = (
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            f"{_quote_ident(spec.name)} ON {spec.definition}"
+        )
+        if dry_run:
+            print(statement + ";")
+            summary.created.append(spec.name)
+            continue
+
+        try:
+            conn.execute(text(statement))
+        except Exception as exc:  # noqa: BLE001 - não pode derrubar o deploy
+            summary.errors.append(spec.name)
+            message = str(exc).strip().splitlines()[0] if str(exc).strip() else repr(exc)
+            hint = ""
+            if "duplicate key" in message or "could not create unique index" in message:
+                hint = (
+                    " — há valores duplicados na(s) coluna(s); remova as duplicatas"
+                    " e rode de novo"
+                )
+            log.error(
+                "falha ao criar índice único: %s%s",
+                message,
+                hint,
+                extra={"context": {"index": spec.name, "table": spec.table}},
+            )
+            continue
+
+        summary.created.append(spec.name)
+        log.info(
+            "índice único criado (faltava no banco)",
+            extra={"context": {"index": spec.name, "table": spec.table}},
+        )
+
+
 def ensure_indexes(
     *,
     dry_run: bool = False,
@@ -803,6 +955,10 @@ def ensure_indexes(
             _apply_session_settings(conn, timeout_seconds, maintenance_work_mem)
             _ensure_foundation(conn)
             _reconcile(conn, summary, dry_run=dry_run)
+            try:
+                _reconcile_unique(conn, summary, dry_run=dry_run)
+            except Exception as exc:  # noqa: BLE001 - o deploy não pode parar
+                log.error("reconciliação dos índices únicos falhou: %s", exc)
         finally:
             conn.execute(
                 text("SELECT pg_advisory_unlock(:key)"), {"key": _ADVISORY_LOCK_KEY}
@@ -829,6 +985,13 @@ def _emit_sql(timeout_seconds: int = 0, maintenance_work_mem: str = "256MB") -> 
     for spec in sorted(ALL_INDEXES, key=lambda item: item.heavy):
         lines.append(
             f"CREATE INDEX IF NOT EXISTS {_quote_ident(spec.name)} ON {spec.definition};"
+        )
+    lines.append("")
+    lines.append("-- Índices únicos exigidos por ON CONFLICT (self-heal).")
+    for spec in _unique_specs():
+        lines.append(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {_quote_ident(spec.name)}"
+            f" ON {spec.definition};"
         )
     lines.append("")
     lines.extend(f"ANALYZE {_quote_ident(table)};" for table in INPI_ANALYZE_TABLES)
@@ -894,8 +1057,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     log.info(
-        "reconciliando índices (%d no manifesto, timeout por índice: %s)",
+        "reconciliando índices (%d no manifesto, %d índices únicos exigidos, "
+        "timeout por índice: %s)",
         len(ALL_INDEXES),
+        len(REQUIRED_UNIQUE_INDEXES),
         timeout_seconds if timeout_seconds > 0 else "sem limite",
     )
     try:

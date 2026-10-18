@@ -109,6 +109,9 @@ export type MarcaDetail = Marca & {
   // real armazenada; `logo_status` reflete o processamento (OK/SEM_IMAGEM/...).
   tem_logo: boolean;
   logo_status: string | null;
+  // Imagem embutida (data URI) já pronta para uso no detalhe; `null` quando não
+  // há arquivo em disco — aí a UI cai para `/api/marcas/{codigo}/logo`.
+  logo?: string | null;
   // Petições (documentos GRU) — não vêm dos dados abertos; o worker
   // `ingestion.peticoes` as busca no pePI. `peticoes_status` (OK/SEM_DADOS/
   // PENDING/ERROR) distingue "sem petições" de "ainda não sincronizado".

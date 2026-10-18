@@ -55,6 +55,10 @@ class MarcaOut(BaseModel):
 
 
 class MarcaDetail(MarcaOut):
+    # Logotipo embutido como data URI (``data:image/jpeg;base64,...``) para a tela
+    # de detalhe não precisar de uma segunda requisição; ``None`` quando não há
+    # imagem em disco (ou ela é grande demais — aí a UI usa a rota ``/logo``).
+    logo: str | None = None
     data_publicacao: date | None = None
     data_vigencia: date | None = None
     traducao: str | None = None

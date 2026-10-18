@@ -173,6 +173,54 @@ def test_upsert_e_get_rpi_preserva_metadata(db) -> None:
     assert row["metadata"]["sections"]["marcas"]["despachos_novos"] == 5
 
 
+def test_upsert_rpi_funciona_sem_a_constraint_unica() -> None:
+    """Regressão do bug de produção: o banco estava sem `uq_inpi_rpi_number`.
+
+    Com o `ON CONFLICT (number)` antigo, a primeira gravação do worker falhava com
+    ``InvalidColumnReference``. O upsert tem de funcionar mesmo num schema
+    divergente (é justamente o caso de um restore/dump antigo).
+
+    Não usa a fixture ``db`` de propósito: uma sessão ORM aberta segura um
+    ``ACCESS SHARE`` que travaria o ``ALTER TABLE`` que devolve a constraint.
+    """
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE inpi_rpi DROP CONSTRAINT IF EXISTS uq_inpi_rpi_number")
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_inpi_rpi_number"))
+
+    try:
+        ing_db.upsert_rpi(number="9999", status="DISCOVERED", meta={"sections": {}})
+        ing_db.upsert_rpi(
+            number="9999", status="PROCESSED", meta={"sections": {"marcas": {}}}
+        )
+
+        row = ing_db.get_rpi("9999")
+        assert row is not None
+        assert row["status"] == "PROCESSED"
+        assert row["metadata"]["sections"] == {"marcas": {}}
+
+        with engine.connect() as conn:
+            total = conn.execute(
+                text("SELECT count(*) FROM inpi_rpi WHERE number = '9999'")
+            ).scalar()
+        assert total == 1  # atualiza, não duplica
+    finally:
+        # Devolve o schema ao estado do Alembic para o resto da suíte.
+        with engine.begin() as conn:
+            conn.execute(text("DROP INDEX IF EXISTS uq_inpi_rpi_number"))
+            conn.execute(
+                text(
+                    "ALTER TABLE inpi_rpi ADD CONSTRAINT uq_inpi_rpi_number"
+                    " UNIQUE (number)"
+                )
+            )
+
+
 # --- Fluxo completo de uma edição ------------------------------------------
 def test_process_edition_marcas_ponta_a_ponta(db, rpi_tmp) -> None:
     db.add(Marca(codigo_interno="4482935", numero_inpi="922437041"))

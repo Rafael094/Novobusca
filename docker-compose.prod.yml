@@ -106,6 +106,14 @@ services:
     container_name: intelliinpi_peticoes
     restart: unless-stopped
 
+    # Só começa depois que a API está saudável: o comando do `api` roda
+    # `alembic upgrade head` (que cria `marcas_peticoes`/`marcas_pepi_sync`) e
+    # `app.db_indexes` antes do uvicorn. Sem isto o worker pode subir antes de as
+    # tabelas existirem e falhar na primeira rodada.
+    depends_on:
+      api:
+        condition: service_healthy
+
     # Mesmos segredos/URL do backend (DATABASE_URL aponta para o PostgreSQL do
     # host via host.docker.internal — ver extra_hosts).
     env_file:
@@ -155,6 +163,12 @@ services:
     image: intelliinpi-rpi:latest
     container_name: intelliinpi_rpi
     restart: unless-stopped
+
+    # Mesma razão do `peticoes`: espera a API terminar `alembic upgrade head` +
+    # `app.db_indexes` (que garante os índices únicos usados em ON CONFLICT).
+    depends_on:
+      api:
+        condition: service_healthy
 
     env_file:
       - ./backend/.env

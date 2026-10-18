@@ -40,7 +40,11 @@ from app.schemas.search import (
     PaginatedMonitoramentos,
     Pagination,
 )
-from app.services.marca_logos import resolve_logo_file
+from app.services.marca_logos import (
+    inline_logo_data_uri,
+    resolve_logo_file,
+    stored_logo_file,
+)
 
 router = APIRouter(prefix="/marcas", tags=["marcas"])
 
@@ -476,11 +480,13 @@ def list_monitoramento(
 
         # Logo: DB-only. The offline worker (``ingestion.logos``) downloads the
         # images; the API just reflects what is stored and shows a placeholder
-        # whenever the image is absent.
+        # whenever the image is absent. ``tem_logo`` olha o *arquivo* em disco,
+        # não só a linha em ``marcas_logos``: senão a lista pediria /logo e
+        # receberia 404 quando a imagem não veio junto no restore.
         logo = logos.get(row.codigo_interno)
         if logo is None and row.codigo_interno:
             logo = _load_logo(db, row.codigo_interno)
-        out.tem_logo = bool(logo and logo.status == "OK")
+        out.tem_logo = stored_logo_file(logo, row.codigo_interno) is not None
         out.logo_status = logo.status if logo else None
 
         items.append(out)
@@ -695,8 +701,14 @@ def get_marca(
         }
         for d in despachos
     ]
+    # ``tem_logo`` reflete o que o servidor consegue *entregar* (arquivo em
+    # disco), não apenas a linha em ``marcas_logos`` — sem isso a UI pede a
+    # imagem e recebe 404. O data URI vai embutido para a tela não precisar de
+    # uma segunda requisição.
+    logo_file = stored_logo_file(logo, codigo_interno)
     detail.logo_status = logo.status if logo else None
-    detail.tem_logo = bool(logo and logo.status == "OK")
+    detail.tem_logo = logo_file is not None
+    detail.logo = inline_logo_data_uri(logo_file, logo.mime if logo else None)
     detail.peticoes = [
         {
             "protocolo": p.protocolo,

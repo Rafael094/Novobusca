@@ -248,7 +248,7 @@ def _rel_arquivo(path: Path) -> str:
 
     try:
 
-        return str(path.relative_to(CONFIG.data_dir))
+        return path.relative_to(CONFIG.data_dir).as_posix()
 
     except ValueError:
 

@@ -388,19 +388,41 @@ def test_detail_enfileira_marca_sem_sync(db, seeded, client):
     assert db.query(MarcaPepiSync).filter_by(codigo_interno="c3").count() == 1
 
 
-def test_detail_reports_logo_status(db, seeded, client):
-    """tem_logo is only True for status=OK; other statuses flow through."""
+def test_detail_reports_logo_status(db, seeded, client, tmp_path, monkeypatch):
+    """``tem_logo`` reflects the *file* on disk, not only the ``marcas_logos`` row.
+
+    A row with status ``OK`` whose image never made it to the server (e.g. the
+    DB was restored without ``data/raw/marcas/logos``) must NOT advertise
+    ``tem_logo`` — otherwise the UI requests ``/logo`` and gets a 404.
+    """
+    from app.config import settings
     from app.models import MarcaLogo
+
+    monkeypatch.setattr(
+        settings.__class__, "data_path", property(lambda self: tmp_path)
+    )
 
     token = _seed(client, db)
     db.add(MarcaLogo(codigo_interno="c1", status="SEM_IMAGEM"))
+    grupo = tmp_path / "raw" / "marcas" / "logos" / "62"
+    grupo.mkdir(parents=True, exist_ok=True)
+    (grupo / "c2.jpg").write_bytes(b"\xff\xd8\xff\xe0FAKEJPEG")
     db.add(
         MarcaLogo(
             codigo_interno="c2",
             status="OK",
-            arquivo="raw/marcas/logos/62/x.jpg",
+            arquivo="raw/marcas/logos/62/c2.jpg",
             mime="image/jpeg",
-            bytes=10,
+            bytes=12,
+        )
+    )
+    db.add(
+        MarcaLogo(
+            codigo_interno="c3",
+            status="OK",
+            arquivo="raw/marcas/logos/63/ausente.jpg",
+            mime="image/jpeg",
+            bytes=12,
         )
     )
     db.commit()
@@ -408,10 +430,19 @@ def test_detail_reports_logo_status(db, seeded, client):
     c1 = client.get("/api/marcas/c1", headers=auth_header(token)).json()
     assert c1["logo_status"] == "SEM_IMAGEM"
     assert c1["tem_logo"] is False
+    assert c1["logo"] is None
 
     c2 = client.get("/api/marcas/c2", headers=auth_header(token)).json()
     assert c2["logo_status"] == "OK"
     assert c2["tem_logo"] is True
+    # A imagem vai embutida no detalhe: a UI não precisa de uma 2ª requisição.
+    assert c2["logo"].startswith("data:image/jpeg;base64,")
+
+    # Linha OK porém arquivo ausente no servidor → nada a mostrar.
+    c3 = client.get("/api/marcas/c3", headers=auth_header(token)).json()
+    assert c3["logo_status"] == "OK"
+    assert c3["tem_logo"] is False
+    assert c3["logo"] is None
 
 
 def test_logo_endpoint_404_when_absent(db, seeded, client):

@@ -330,11 +330,17 @@ function NotImportedNote({ children }: { children: React.ReactNode }) {
 
 /**
  * Marca image (logotipo) slot. Renders the real downloaded image when the
- * backend reports one (`tem_logo`); otherwise a labelled placeholder derived
- * from the apresentação (see report §3/§17.8).
+ * backend reports one; otherwise a labelled placeholder derived from the
+ * apresentação (see report §3/§17.8).
+ *
+ * O detalhe já recebe a imagem embutida (`marca.logo`, um data URI) e então não
+ * faz uma segunda requisição. Quando ela não vem (imagem grande ou ausente na
+ * tela de lista), caímos para a rota `/api/marcas/{codigo}/logo`.
  */
 function MarcaImagem({ marca }: { marca: MarcaDetail }) {
-  const logo = useMarcaLogo(marca.codigo_interno, marca.tem_logo);
+  const embutida = marca.logo ?? null;
+  const logo = useMarcaLogo(marca.codigo_interno, !embutida && marca.tem_logo);
+  const src = embutida ?? logo.data;
   const isFigurativa = /figurativa|mista/i.test(
     marca.descricao_apresentacao ?? "",
   );
@@ -347,12 +353,12 @@ function MarcaImagem({ marca }: { marca: MarcaDetail }) {
     };
   }, [logo.data]);
 
-  if (marca.tem_logo && logo.data) {
+  if (src) {
     return (
       <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={logo.data}
+          src={src}
           alt={`Logotipo de ${marca.elemento_nominativo ?? "marca"}`}
           className="h-full w-full object-contain"
         />

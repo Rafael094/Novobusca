@@ -288,6 +288,16 @@ buraco: ele carrega o manifesto dos índices que devem existir e, **a cada
 deploy**, cria apenas o que estiver faltando. Um banco recriado, um restore ou
 um índice apagado à mão voltam ao normal no próximo deploy, sem intervenção.
 
+Além dos índices de busca, o mesmo passo garante os **índices únicos** de que o
+código da ingestão depende para `INSERT ... ON CONFLICT` (`inpi_dataset.name`,
+`inpi_import_checkpoint(dataset_id, target_table)`, `inpi_rpi.number`,
+`marcas_logos.codigo_interno`, `marcas_peticoes(codigo_interno, protocolo)`,
+`marcas_pepi_sync.codigo_interno`). Um banco cujo schema divergiu do Alembic
+(dump/restore antigo) quebrava na primeira gravação do worker com
+`InvalidColumnReference: there is no unique or exclusion constraint matching the
+ON CONFLICT specification` — foi o que aconteceu em produção com `inpi_rpi`.
+Agora ele se conserta sozinho no deploy.
+
 Propriedades (e por que é seguro deixar isso no caminho de subida):
 
 - **idempotente** — quando já está tudo no lugar leva ~1 s (só consulta o catálogo);
@@ -305,9 +315,10 @@ O log do deploy mostra exatamente o que aconteceu:
 
 ```bash
 docker compose -f docker-compose.prod.yml logs api | grep db_indexes
-# "reconciliando índices (186 no manifesto, timeout por índice: sem limite)"
+# "reconciliando índices (186 no manifesto, 6 índices únicos exigidos, timeout por índice: sem limite)"
 # "índice criado em 42.7s"  {"index": "ix_marcas_data_vigencia", "table": "marcas"}
-# "reconciliação de índices concluída em 43.1s: 1 criado(s), 183 já existia(m), 0 conflito(s), 0 tabela(s) ausente(s), 0 erro(s)"
+# "índice único criado (faltava no banco)"  {"index": "uq_inpi_rpi_number", "table": "inpi_rpi"}
+# "reconciliação de índices concluída em 43.1s: 2 criado(s), 188 já existia(m), 0 conflito(s), 0 tabela(s) ausente(s), 0 erro(s)"
 ```
 
 ### Rodar/inspecionar à mão
@@ -425,6 +436,37 @@ docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
 > docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
 >   python -m ingestion.logos --apresentacao Mista --apresentacao Figurativa
 > ```
+
+### 5.2.1 Logotipos — a **imagem** tem de estar no servidor, não só a linha no banco
+
+`marcas_logos` guarda o *metadado* e a coluna `arquivo` aponta para o JPEG em
+`data/raw/marcas/logos/<2 primeiros dígitos>/<codigo>.jpg` (mesmo volume
+`api_data`). **Restaurar só o dump do banco não traz as imagens**: a linha fica
+`status = OK` mas o arquivo não existe no host e a tela cai no placeholder.
+
+`tem_logo` (na busca e no detalhe) reflete o **arquivo em disco**, não o status da
+linha — então, quando a imagem não veio junto no restore, a API já responde
+`tem_logo: false` em vez de mandar a UI pedir uma imagem que daria 404.
+
+- **`GET /api/marcas/{codigo}`** devolve o logotipo **embutido** no campo `logo`
+  como data URI (`data:image/jpeg;base64,...`), até 512 KB — a tela de detalhe
+  não faz uma segunda requisição. `logo: null` quando não há imagem em disco.
+- **`GET /api/marcas/{codigo}/logo`** continua existindo para as **listas**
+  (monitoramento, resultados), onde embutir dezenas de imagens no JSON seria
+  desperdício; faz streaming do arquivo (cacheável pelo navegador).
+
+Conferir se as imagens chegaram na VM:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api sh -c \
+  'ls -l $DATA_DIR/raw/marcas/logos/44/ | head'
+```
+
+> **Barra invertida do Windows.** O worker rodado no Windows gravava
+> `raw\marcas\logos\44\4482935.jpg`. No Linux esse valor é *um único* nome de
+> arquivo, então a leitura já normaliza `\` → `/` (e ainda tenta o caminho
+> canônico `logos/<2 dígitos>/<arquivo>`). Downloads novos são gravados em
+> formato POSIX, portável entre Windows e Linux.
 
 ## 5.3 Worker da RPI — atualização **semanal** de marcas e patentes
 
