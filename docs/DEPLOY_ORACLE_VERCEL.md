@@ -430,7 +430,8 @@ docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
 
 > **Logotipos são outro worker.** O serviço `peticoes` **não** baixa imagens —
 > isso continua em `ingestion.logos` (a imagem aparece na tela via
-> `marcas_logos`). Para rodá-lo no container de ingestão:
+> `marcas_logos`). Para rodá-lo no container de ingestão (monta o mesmo volume
+> `api_data` da API — ver §5.2.1):
 >
 > ```bash
 > docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
@@ -459,8 +460,34 @@ Conferir se as imagens chegaram na VM:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec api sh -c \
-  'ls -l $DATA_DIR/raw/marcas/logos/44/ | head'
+  'ls -l /app/data/raw/marcas/logos/44/ | head'
 ```
+
+Para **popular** as imagens, rode o worker pelo container de ingestão — ele monta o
+mesmo volume `api_data` da API, então o arquivo cai exatamente onde a API lê:
+
+```bash
+# 1) o pePI está no ar? (DNS/TCP/TLS/HTTP)
+docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+  python -m ingestion.logos --diagnostico
+
+# 2) baixe os códigos desejados (--codigos é repetível)
+docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+  python -m ingestion.logos --codigos 4482935 --codigos 4362154
+```
+
+Se o preflight falhar (INPI fora do ar) **nada** é gravado; `--force` pula a
+checagem. O worker é resumível: rodar de novo só completa o que faltou.
+
+> **Alternativa sem rede (restore).** As imagens podem ser copiadas do ambiente
+> de origem direto para o volume — o banco precisa das linhas em `marcas_logos`
+> **e** os JPEGs dentro de `api_data`:
+>
+> ```bash
+> docker cp /tmp/logos/. intelliinpi_api:/app/data/raw/marcas/logos/
+> ```
+>
+> Caminhos gravados com `\` continuam válidos graças à normalização.
 
 > **Barra invertida do Windows.** O worker rodado no Windows gravava
 > `raw\marcas\logos\44\4482935.jpg`. No Linux esse valor é *um único* nome de

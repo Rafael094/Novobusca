@@ -126,6 +126,14 @@ services:
       INPI_PEPI_CONCURRENCY: "2"
       INPI_PEPI_DELAY: "0.25"
 
+    volumes:
+      # MESMO DATA_DIR da API. Sem isto, rodar `ingestion.logos` por aqui
+      # (é o jeito documentado de baixar logotipos — o worker não tem serviço
+      # próprio) gravaria a imagem num /app/data efêmero do container: a linha
+      # iria para o banco, mas a API — que serve de `api_data` — nunca veria o
+      # arquivo e a tela cairia no placeholder.
+      - api_data:/app/data
+
     command: >
       sh -c "while true; do
                python -m ingestion.peticoes
