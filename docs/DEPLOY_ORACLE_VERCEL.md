@@ -463,31 +463,55 @@ docker compose -f docker-compose.prod.yml exec api sh -c \
   'ls -l /app/data/raw/marcas/logos/44/ | head'
 ```
 
-Para **popular** as imagens, rode o worker pelo container de ingestão — ele monta o
-mesmo volume `api_data` da API, então o arquivo cai exatamente onde a API lê:
+Há três formas de **popular** as imagens (a primeira não depende de transferir
+nada):
+
+**1. Busca sob demanda (recomendada para uma VM nova).** Ligue
+`LOGO_FETCH_ENABLED=true` no `backend/.env` da VM — e **baixe o timeout**, que
+por padrão é 120 s e bloquearia a requisição do detalhe:
+
+```
+LOGO_FETCH_ENABLED=true
+LOGO_HTTP_TIMEOUT_SECONDS=15
+LOGO_HTTP_RETRIES=1
+```
 
 ```bash
-# 1) o pePI está no ar? (DNS/TCP/TLS/HTTP)
-docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
-  python -m ingestion.logos --diagnostico
+docker compose -f docker-compose.prod.yml up -d api
+```
 
-# 2) baixe os códigos desejados (--codigos é repetível)
+A partir daí, abrir o detalhe de uma marca **Mista/Figurativa** faz a API buscar
+a imagem no pePI, gravar em `api_data` + `marcas_logos` e devolvê-la já embutida
+em `logo`. Nominativa é ignorada (não carrega imagem), e uma vez gravada não há
+mais acesso à rede. Ao terminar de povoar, volte para `false` — assim nenhuma
+leitura fica esperando o INPI.
+
+> É uma escrita em `GET` (o desenho original já previa a flag). Com a flag
+> **desligada** (padrão) a API é DB-only e nunca toca o pePI.
+
+**2. Worker offline**, pelo container de ingestão (monta o mesmo volume
+`api_data` da API):
+
+```bash
 docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
-  python -m ingestion.logos --codigos 4482935 --codigos 4362154
+  python -m ingestion.logos --diagnostico        # o pePI está no ar?
+
+docker compose -f docker-compose.prod.yml run --rm --no-deps peticoes \
+  python -m ingestion.logos --apresentacao Mista --limite 500
 ```
 
 Se o preflight falhar (INPI fora do ar) **nada** é gravado; `--force` pula a
-checagem. O worker é resumível: rodar de novo só completa o que faltou.
+checagem. `logo_codes` ordena por `codigo_interno`, então `--limite` é
+determinístico e o progresso é retomável entre rodadas.
 
-> **Alternativa sem rede (restore).** As imagens podem ser copiadas do ambiente
-> de origem direto para o volume — o banco precisa das linhas em `marcas_logos`
-> **e** os JPEGs dentro de `api_data`:
->
-> ```bash
-> docker cp /tmp/logos/. intelliinpi_api:/app/data/raw/marcas/logos/
-> ```
->
-> Caminhos gravados com `\` continuam válidos graças à normalização.
+**3. Copiar os arquivos** já baixados em outro ambiente (restore) — o banco
+precisa das linhas em `marcas_logos` **e** os JPEGs dentro de `api_data`:
+
+```bash
+docker cp /tmp/logos/. intelliinpi_api:/app/data/raw/marcas/logos/
+```
+
+Caminhos gravados com `\` continuam válidos graças à normalização.
 
 > **Barra invertida do Windows.** O worker rodado no Windows gravava
 > `raw\marcas\logos\44\4482935.jpg`. No Linux esse valor é *um único* nome de

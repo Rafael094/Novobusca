@@ -94,8 +94,11 @@ class Settings(BaseSettings):
     # Logotipo fetching is done by the offline worker (``python -m
     # ingestion.logos``). The API is DB-first and, by default, READ-ONLY: it
     # serves whatever the worker already stored and shows a placeholder when the
-    # image is absent. Set to ``True`` only to allow the old on-demand fetch from
-    # INPI during an API request (not recommended; blocks a request/worker).
+    # image is absent. ``True`` re-enables the on-demand fetch from INPI during
+    # an API request: the detail then downloads, stores and embeds the logotipo
+    # (see the runbook §5.2.1 — it is how a fresh VM gets populated without
+    # copying files). It blocks the request, so leave it ``False`` day-to-day and
+    # keep the timeout small while it is on — 120 s is the legacy ceiling.
     logo_fetch_enabled: bool = Field(default=False, alias="LOGO_FETCH_ENABLED")
     logo_http_timeout_seconds: int = Field(
         default=120, alias="LOGO_HTTP_TIMEOUT_SECONDS"

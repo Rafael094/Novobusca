@@ -531,6 +531,12 @@ def logo_codes(
             """
         )
     sql = f"SELECT m.codigo_interno FROM marcas m WHERE {' AND '.join(where)}"
+    # ``ORDER BY`` explícito (usa ``ix_marcas_codigo_interno``): sem ele o
+    # ``LIMIT`` devolve a ordem que o planner quiser, então rodadas sucessivas
+    # com ``--limite`` podem reprocessar sempre as mesmas linhas — e, como quem
+    # falha (``ERROR``) volta a ficar pendente, o lote nunca alcança códigos
+    # novos. Com ordem determinística o progresso é garantido e retomável.
+    sql += " ORDER BY m.codigo_interno"
     if limit:
         sql += " LIMIT %(limit)s"
         params["limit"] = limit

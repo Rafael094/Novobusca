@@ -485,3 +485,77 @@ def test_logo_endpoint_streams_stored_file(db, seeded, client, tmp_path, monkeyp
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("image/jpeg")
     assert resp.content == b"\xff\xd8\xff\xe0FAKEJPEG"
+
+
+_JPEG = b"\xff\xd8\xff\xe0logo-baixado-na-hora"
+
+
+class _FakePool:
+    """Sessão pePI falsa: devolve um JPEG e conta as chamadas."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def get(self):
+        pool = self
+
+        class _Sess:
+            def fetch(self, codigo_interno):  # noqa: ANN001
+                pool.calls.append(codigo_interno)
+                return "image", _JPEG, "image/jpeg"
+
+        return _Sess()
+
+    def close(self):
+        pass
+
+
+def test_detail_busca_logo_na_hora_quando_habilitado(
+    db, seeded, client, tmp_path, monkeypatch
+):
+    """Com ``LOGO_FETCH_ENABLED=true`` o detalhe baixa, guarda e embute o logo.
+
+    É o caminho para povoar uma VM nova sem transferir arquivo (runbook §5.2.1):
+    basta abrir a marca, desde que seja Mista/Figurativa.
+    """
+    from app.config import settings
+    from app.services import marca_logos
+
+    monkeypatch.setattr(settings.__class__, "data_path", property(lambda self: tmp_path))
+    monkeypatch.setattr(marca_logos.settings, "logo_fetch_enabled", True)
+    pool = _FakePool()
+    monkeypatch.setattr(marca_logos, "_POOL", pool)
+
+    token = _seed(client, db)
+    db.add(
+        Marca(
+            codigo_interno="mista1",
+            numero_inpi="1",
+            elemento_nominativo="LOGOMISTA",
+            descricao_apresentacao="Mista",
+        )
+    )
+    db.add(
+        Marca(
+            codigo_interno="nom1",
+            numero_inpi="2",
+            elemento_nominativo="SEMIMAGEM",
+            descricao_apresentacao="Nominativa",
+        )
+    )
+    db.commit()
+
+    body = client.get("/api/marcas/mista1", headers=auth_header(token)).json()
+    assert pool.calls == ["mista1"]
+    assert body["tem_logo"] is True
+    assert body["logo"].startswith("data:image/jpeg;base64,")
+    # Ficou armazenado: a segunda leitura não toca a rede de novo.
+    again = client.get("/api/marcas/mista1", headers=auth_header(token)).json()
+    assert pool.calls == ["mista1"]
+    assert again["logo"] == body["logo"]
+
+    # Nominativa não carrega imagem: nem gasta requisição.
+    nom = client.get("/api/marcas/nom1", headers=auth_header(token)).json()
+    assert pool.calls == ["mista1"]
+    assert nom["tem_logo"] is False
+    assert nom["logo"] is None

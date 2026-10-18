@@ -43,6 +43,7 @@ from app.schemas.search import (
 from app.services.marca_logos import (
     inline_logo_data_uri,
     resolve_logo_file,
+    resolve_marca_logo,
     stored_logo_file,
 )
 
@@ -594,9 +595,14 @@ def get_marca(
         .where(MarcaDespacho.codigo_interno == codigo_interno)
         .order_by(MarcaDespacho.data_rpi.desc().nullslast())
     ).scalars().all()
-    logo = db.execute(
-        select(MarcaLogo).where(MarcaLogo.codigo_interno == codigo_interno)
-    ).scalar_one_or_none()
+    # Logotipo: DB-first. Com ``LOGO_FETCH_ENABLED=true`` (opt-in, ver §5.2.1 do
+    # runbook) o detalhe busca a imagem no pePI na hora e a deixa armazenada —
+    # é assim que se povoa o volume numa VM nova, sem transferir arquivo. O
+    # guard de apresentação evita gastar requisição com Nominativa, que não
+    # carrega imagem.
+    _apresentacao = (marca.descricao_apresentacao or "").lower()
+    _pode_buscar = None if ("mista" in _apresentacao or "figurativa" in _apresentacao) else False
+    logo = resolve_marca_logo(db, codigo_interno, allow_fetch=_pode_buscar)
     peticoes = db.execute(
         select(MarcaPeticao)
         .where(MarcaPeticao.codigo_interno == codigo_interno)
