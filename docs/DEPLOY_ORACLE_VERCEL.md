@@ -208,7 +208,7 @@ docker compose -f docker-compose.prod.yml logs -f --tail=200 api
 # atualizar o código
 cd /opt/intelliinpi
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build --wait
 
 # parar / derrubar
 docker compose -f docker-compose.prod.yml down            # mantém os volumes
@@ -254,7 +254,23 @@ em `api_data`. Ambos sobrevivem a `up --build` e `down` (mas não a `down -v`).
 
 ```bash
 cd /opt/intelliinpi
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d --build --wait
+```
+
+`--wait` só retorna quando o `api` estiver **`healthy`**. Use sempre: o boot é
+sequencial (`alembic upgrade head` → `app.db_indexes` → `app.seed` → `uvicorn`) e
+leva **~60–90 s** sem ninguém escutando na 8000. Nessa janela o Caddy responde
+**502** em tudo — o que o browser reporta como erro de CORS, porque o preflight
+`OPTIONS` não volta com os cabeçalhos. Não é bug: se você clicar em "Entrar"
+durante o boot, vai parecer que a API caiu.
+
+Se o comando parecer travado, o `api` é que não ficou saudável — abra outro
+terminal e veja `logs api`. `Ctrl+C` é seguro: o `-d` já subiu tudo em segundo
+plano. Sem o `--wait`, confirme antes de usar o site:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+# intelliinpi_api ... Up (healthy)
 ```
 
 O comando do container roda, antes de iniciar o servidor, as migrations, a
@@ -390,7 +406,7 @@ Sobe junto com a stack e fica em loop:
 
 ```bash
 cd /opt/intelliinpi
-docker compose -f docker-compose.prod.yml up -d --build   # sobe api + peticoes + rpi
+docker compose -f docker-compose.prod.yml up -d --build --wait  # api + peticoes + rpi
 docker compose -f docker-compose.prod.yml logs -f peticoes
 ```
 
@@ -561,12 +577,18 @@ Sobe junto com a stack e fica em loop (um ciclo a cada 6 h):
 
 ```bash
 cd /opt/intelliinpi
-docker compose -f docker-compose.prod.yml up -d --build   # api + peticoes + rpi
+docker compose -f docker-compose.prod.yml up -d --build --wait  # api + peticoes + rpi
 docker compose -f docker-compose.prod.yml logs -f rpi
 ```
 
 - **Pausar sem derrubar a stack:** `docker compose -f docker-compose.prod.yml stop rpi`
 - **Fonte alternativa:** env `INPI_RPI_BASE_URL` (padrão `https://revistas.inpi.gov.br`).
+- **Portal em manutenção:** o INPI derruba o `revistas.inpi.gov.br` por completo de
+  vez em quando e **todo** caminho dele responde `503` (não é a VM, não é IP
+  bloqueado — confira de outra rede se duvidar). O worker registra
+  `Portal das Revistas inacessível (HTTP 503). Nada a fazer agora.` e segue
+  vivo: nada é gravado, nada quebra, e o ciclo seguinte (6 h) tenta de novo.
+  Zero intervenção necessária; quando o portal volta, o worker pega sozinho.
 
 ### Idempotência e resume
 
