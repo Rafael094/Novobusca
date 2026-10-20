@@ -8,7 +8,7 @@
 // --- Donut ------------------------------------------------------------------
 export type DonutSlice = { label: string; value: number; color?: string };
 
-const DEFAULT_COLORS = ["#2563eb", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#94a3b8"];
+const DEFAULT_COLORS = ["#1a22cf", "#f59e0b", "#ef4444", "#10b981", "#8b5cf6", "#94a3b8"];
 
 export function DonutChart({
   data,
@@ -93,7 +93,7 @@ export function DonutChart({
               }}
             />
             <span className="text-slate-600">{d.label}</span>
-            <span className="font-medium text-slate-800">
+            <span className="font-medium" style={{ color: "var(--text-main)" }}>
               {d.value.toLocaleString("pt-BR")}
             </span>
           </li>

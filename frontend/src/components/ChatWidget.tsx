@@ -125,7 +125,10 @@ export default function ChatWidget() {
 
       {/* Painel do chat */}
       {open && (
-        <div className="fixed bottom-24 right-5 z-50 flex h-[min(85vh,44rem)] w-[min(96vw,30rem)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl sm:w-[min(94vw,34rem)] lg:w-[38rem] lg:max-w-[calc(100vw-11rem)]">
+        <div
+          className="fixed bottom-24 right-5 z-50 flex h-[min(85vh,44rem)] w-[min(96vw,30rem)] flex-col overflow-hidden rounded-2xl border shadow-2xl sm:w-[min(94vw,34rem)] lg:w-[38rem] lg:max-w-[calc(100vw-11rem)]"
+          style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
+        >
           <div className="flex items-start justify-between gap-3 bg-brand-600 px-4 py-3 text-white">
             <div className="min-w-0">
               <p className="text-sm font-semibold">Assistente IntelliINPI</p>
@@ -164,7 +167,7 @@ export default function ChatWidget() {
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4 scrollbar-thin">
             {messages.length === 0 && (
               <div className="space-y-3">
-                <p className="text-sm text-slate-500">
+                <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                   Olá! Pergunte sobre qualquer módulo, tela ou caminho do sistema.
                 </p>
                 <div className="space-y-2">
@@ -173,7 +176,8 @@ export default function ChatWidget() {
                       key={s}
                       type="button"
                       onClick={() => send(s)}
-                      className="block w-full rounded-lg border border-gray-200 px-3 py-2 text-left text-xs text-slate-600 hover:border-brand-300 hover:bg-brand-50"
+                      className="block w-full rounded-lg border px-3 py-2 text-left text-xs hover:border-brand-300 hover:bg-brand-50"
+                      style={{ borderColor: "var(--border-color)", color: "var(--text-muted)" }}
                     >
                       {s}
                     </button>
@@ -189,10 +193,13 @@ export default function ChatWidget() {
               >
                 <div
                   className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
-                    m.role === "user"
-                      ? "bg-brand-600 text-white"
-                      : "bg-slate-100 text-slate-800"
+                    m.role === "user" ? "bg-brand-600 text-white" : ""
                   }`}
+                  style={
+                    m.role === "user"
+                      ? undefined
+                      : { background: "var(--bg-subtle)", color: "var(--text-main)" }
+                  }
                 >
                   {m.content}
                 </div>
@@ -201,7 +208,10 @@ export default function ChatWidget() {
 
             {ask.isPending && (
               <div className="flex justify-start">
-                <div className="rounded-2xl bg-slate-100 px-3 py-2 text-sm text-slate-500">
+                <div
+                  className="rounded-2xl px-3 py-2 text-sm"
+                  style={{ background: "var(--bg-subtle)", color: "var(--text-muted)" }}
+                >
                   Consultando…
                 </div>
               </div>
@@ -209,8 +219,8 @@ export default function ChatWidget() {
           </div>
 
           {sources.length > 0 && (
-            <div className="border-t border-gray-100 px-3 py-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <div className="border-t px-3 py-2" style={{ borderColor: "var(--border-color)" }}>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-faint)" }}>
                 Fontes
               </p>
               <div className="flex flex-wrap gap-1">
@@ -238,13 +248,15 @@ export default function ChatWidget() {
               e.preventDefault();
               send(input);
             }}
-            className="flex items-center gap-2 border-t border-gray-100 p-2"
+            className="flex items-center gap-2 border-t p-2"
+            style={{ borderColor: "var(--border-color)" }}
           >
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Escreva sua pergunta…"
-              className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+              className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm focus:border-brand-400 focus:outline-none"
+              style={{ background: "var(--bg-input)", borderColor: "var(--border-color)", color: "var(--text-main)" }}
             />
             <button
               type="submit"

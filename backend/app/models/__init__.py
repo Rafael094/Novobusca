@@ -116,6 +116,7 @@ from app.models.marcas import (
     MarcaLogo,
     MarcaPepiSync,
     MarcaPeticao,
+    MarcaRpiImagem,
 )
 from app.models.patentes import (
     Patente,
@@ -129,10 +130,32 @@ from app.models.patentes import (
     PatenteRenumeracao,
     PatenteVinculo,
 )
+from app.models.desenhos import (
+    Desenho,
+    DesenhoAutor,
+    DesenhoClassificacao,
+    DesenhoConteudo,
+    DesenhoDepositante,
+    DesenhoDespacho,
+    DesenhoFigura,
+    DesenhoPrioridade,
+    DesenhoProcurador,
+    DesenhoVinculo,
+)
+from app.models.software import (
+    Software,
+    SoftwareAutor,
+    SoftwareCampos,
+    SoftwareDespacho,
+    SoftwareLinguagem,
+    SoftwareTipo,
+    SoftwareTitular,
+)
 from app.models.rbac import (
     POLICY_ALLOWED,
     POLICY_DENIED,
     Department,
+    DesenhoMonitoramento,
     Group,
     GroupPolicy,
     GutRange,
@@ -143,6 +166,7 @@ from app.models.rbac import (
     PatenteMonitoramento,
     Resource,
     RolePolicy,
+    SoftwareMonitoramento,
     UserCompanyUnity,
     UserGroup,
     UserPolicy,
@@ -202,6 +226,7 @@ __all__ = [
     "MarcaLogo",
     "MarcaPeticao",
     "MarcaPepiSync",
+    "MarcaRpiImagem",
     # patentes
     "Patente",
     "PatenteConteudo",
@@ -213,6 +238,25 @@ __all__ = [
     "PatenteDespacho",
     "PatenteRenumeracao",
     "PatenteVinculo",
+    # desenhos industriais (DI)
+    "Desenho",
+    "DesenhoConteudo",
+    "DesenhoDepositante",
+    "DesenhoAutor",
+    "DesenhoProcurador",
+    "DesenhoClassificacao",
+    "DesenhoPrioridade",
+    "DesenhoDespacho",
+    "DesenhoVinculo",
+    "DesenhoFigura",
+    # software (programa de computador)
+    "Software",
+    "SoftwareCampos",
+    "SoftwareTitular",
+    "SoftwareAutor",
+    "SoftwareLinguagem",
+    "SoftwareTipo",
+    "SoftwareDespacho",
     # rbac (module -> resource -> policies)
     "Resource",
     "RolePolicy",
@@ -232,6 +276,8 @@ __all__ = [
     # selective monitoring
     "MarcaMonitoramento",
     "PatenteMonitoramento",
+    "DesenhoMonitoramento",
+    "SoftwareMonitoramento",
     # NIT
     "InventionDisclosure",
     "DisclosureInventor",

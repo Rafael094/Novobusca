@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { AuthProvider } from "./auth-context";
 import { ChatProvider } from "./chat-context";
+import { ThemeProvider } from "./theme-context";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -22,9 +23,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={client}>
-      <AuthProvider>
-        <ChatProvider>{children}</ChatProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ChatProvider>{children}</ChatProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

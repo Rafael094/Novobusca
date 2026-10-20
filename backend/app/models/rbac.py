@@ -454,3 +454,55 @@ class PatenteMonitoramento(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin,
     )
 
 
+
+
+class DesenhoMonitoramento(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Selective monitoring of a single desenho industrial (mirror of marca)."""
+
+    __tablename__ = "desenhos_monitoramento"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "codigo_interno", name="uq_desenhos_monitoramento_tenant_codigo"
+        ),
+        Index("ix_desenhos_monitoramento_tenant", "tenant_id"),
+        Index("ix_desenhos_monitoramento_codigo", "codigo_interno"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    codigo_interno: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    monitored_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SoftwareMonitoramento(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Selective monitoring of a single software/programa de computador."""
+
+    __tablename__ = "softwares_monitoramento"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "codigo_interno", name="uq_softwares_monitoramento_tenant_codigo"
+        ),
+        Index("ix_softwares_monitoramento_tenant", "tenant_id"),
+        Index("ix_softwares_monitoramento_codigo", "codigo_interno"),
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    codigo_interno: Mapped[str] = mapped_column(String(64), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    monitored_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

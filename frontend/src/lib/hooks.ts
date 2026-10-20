@@ -28,6 +28,8 @@ import type {
   ChatStatus,
   DashboardSummary,
   Dataset,
+  Desenho,
+  DesenhoDetail,
   EffectiveAccess,
   ImportRecord,
   Marca,
@@ -94,6 +96,8 @@ import type {
   Person,
   PolicyDecision,
   Proposal,
+  Software,
+  SoftwareDetail,
   SyncStatus,
   Unity,
 } from "./types";
@@ -254,6 +258,120 @@ export function usePatentesMonitoramento(page = 1, pageSize = 20) {
     queryFn: () =>
       apiFetch<Paginated<Monitoramento>>(
         `/api/patentes/monitoramento${toQuery({ page, page_size: pageSize })}`,
+      ),
+  });
+}
+
+// --- Desenhos Industriais ---------------------------------------------------
+export type DesenhoFilters = {
+  q?: string;
+  numero_inpi?: string;
+  situacao?: string;
+  data_deposito_from?: string;
+  data_deposito_to?: string;
+  page?: number;
+  page_size?: number;
+  enabled?: boolean;
+};
+
+export function useDesenhos(filters: DesenhoFilters) {
+  const { enabled = true, ...params } = filters;
+  return useQuery({
+    queryKey: ["desenhos", params],
+    queryFn: () =>
+      apiFetch<Paginated<Desenho>>(`/api/desenhos/search${toQuery(params)}`),
+    placeholderData: (prev) => prev,
+    enabled,
+  });
+}
+
+export function useDesenho(codigo: string | null) {
+  return useQuery({
+    queryKey: ["desenho", codigo],
+    queryFn: () => apiFetch<DesenhoDetail>(`/api/desenhos/${codigo}`),
+    enabled: !!codigo,
+  });
+}
+
+export function useSetDesenhoMonitoramento() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ codigo, active }: { codigo: string; active: boolean }) =>
+      apiFetch<Monitoramento>(`/api/desenhos/${codigo}/monitoramento`, {
+        method: "POST",
+        body: JSON.stringify({ active }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["desenhos"] });
+      qc.invalidateQueries({ queryKey: ["desenhos-monitoramento"] });
+      qc.invalidateQueries({ queryKey: ["desenho"] });
+    },
+  });
+}
+
+export function useDesenhosMonitoramento(page = 1, pageSize = 20) {
+  return useQuery({
+    queryKey: ["desenhos-monitoramento", page, pageSize],
+    queryFn: () =>
+      apiFetch<Paginated<Monitoramento>>(
+        `/api/desenhos/monitoramento${toQuery({ page, page_size: pageSize })}`,
+      ),
+  });
+}
+
+// --- Programas de Computador (Software) -------------------------------------
+export type SoftwareFilters = {
+  q?: string;
+  numero_inpi?: string;
+  situacao?: string;
+  data_deposito_from?: string;
+  data_deposito_to?: string;
+  page?: number;
+  page_size?: number;
+  enabled?: boolean;
+};
+
+export function useSoftwares(filters: SoftwareFilters) {
+  const { enabled = true, ...params } = filters;
+  return useQuery({
+    queryKey: ["softwares", params],
+    queryFn: () =>
+      apiFetch<Paginated<Software>>(`/api/softwares/search${toQuery(params)}`),
+    placeholderData: (prev) => prev,
+    enabled,
+  });
+}
+
+export function useSoftware(codigo: string | null) {
+  return useQuery({
+    queryKey: ["software", codigo],
+    queryFn: () => apiFetch<SoftwareDetail>(`/api/softwares/${codigo}`),
+    enabled: !!codigo,
+  });
+}
+
+export function useSetSoftwareMonitoramento() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ codigo, active }: { codigo: string; active: boolean }) =>
+      apiFetch<Monitoramento>(`/api/softwares/${codigo}/monitoramento`, {
+        method: "POST",
+        body: JSON.stringify({ active }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["softwares"] });
+      qc.invalidateQueries({ queryKey: ["softwares-monitoramento"] });
+      qc.invalidateQueries({ queryKey: ["software"] });
+    },
+  });
+}
+
+export function useSoftwaresMonitoramento(page = 1, pageSize = 20) {
+  return useQuery({
+    queryKey: ["softwares-monitoramento", page, pageSize],
+    queryFn: () =>
+      apiFetch<Paginated<Monitoramento>>(
+        `/api/softwares/monitoramento${toQuery({ page, page_size: pageSize })}`,
       ),
   });
 }

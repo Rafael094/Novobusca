@@ -64,7 +64,7 @@ export function Funnel({
                   {stage.label}
                 </span>
                 <span className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold text-slate-800">
+                  <span className="text-sm font-semibold" style={{ color: "var(--text-main)" }}>
                     {stage.count.toLocaleString("pt-BR")}
                   </span>
                   {value && (

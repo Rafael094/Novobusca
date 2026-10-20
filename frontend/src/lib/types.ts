@@ -162,6 +162,67 @@ export type PatenteDetail = Patente & {
   despachos: Array<Record<string, unknown>>;
 };
 
+// --- Desenhos Industriais ---------------------------------------------------
+export type Desenho = {
+  id: string;
+  codigo_interno: string;
+  numero_inpi: string | null;
+  data_deposito: string | null;
+  data_concessao: string | null;
+  data_publicacao: string | null;
+  data_vigencia: string | null;
+  titulo: string | null;
+  codigo_situacao: string | null;
+  descricao_situacao: string | null;
+  titulares: string[];
+  titular_principal: string | null;
+  num_titulares: number;
+  classificacoes: string[];
+  tem_figura: boolean;
+  figura_status: string | null;
+  monitorada: boolean;
+  monitoramento_id: string | null;
+};
+
+export type DesenhoDetail = Desenho & {
+  figura: string | null;
+  depositantes: Array<Record<string, unknown>>;
+  autores: Array<Record<string, unknown>>;
+  procuradores: Array<Record<string, unknown>>;
+  classificacoes_locarno: Array<Record<string, unknown>>;
+  prioridades: Array<Record<string, unknown>>;
+  despachos: Array<Record<string, unknown>>;
+  conteudo: Record<string, unknown> | null;
+};
+
+// --- Programas de Computador (Software) -------------------------------------
+export type Software = {
+  id: string;
+  codigo_interno: string;
+  numero_inpi: string | null;
+  data_deposito: string | null;
+  data_concessao: string | null;
+  data_publicacao: string | null;
+  data_criacao: string | null;
+  titulo: string | null;
+  codigo_situacao: string | null;
+  descricao_situacao: string | null;
+  titulares: string[];
+  titular_principal: string | null;
+  num_titulares: number;
+  linguagens: string[];
+  monitorada: boolean;
+  monitoramento_id: string | null;
+};
+
+export type SoftwareDetail = Software & {
+  titulares_detalhe: Array<Record<string, unknown>>;
+  autores: Array<Record<string, unknown>>;
+  tipos: Array<Record<string, unknown>>;
+  campos: Array<Record<string, unknown>>;
+  despachos: Array<Record<string, unknown>>;
+};
+
 export type Paginated<T> = {
   pagination: Pagination;
   items: T[];

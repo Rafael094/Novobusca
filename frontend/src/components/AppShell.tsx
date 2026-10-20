@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/app/auth-context";
+import { useTheme } from "@/app/theme-context";
 import ChatWidget from "./ChatWidget";
 import UserMenu from "./UserMenu";
 
@@ -49,6 +50,8 @@ const NAV: NavItem[] = [
     children: [
       { href: "/marcas", label: "Marcas", perm: "MARCAS_SEARCH" },
       { href: "/patentes", label: "Patentes", perm: "PATENTES_SEARCH" },
+      { href: "/desenhos", label: "Desenhos industriais", perm: "DESENHOS_SEARCH" },
+      { href: "/softwares", label: "Programas de computador", perm: "SOFTWARES_SEARCH" },
       { href: "/monitoramento", label: "Monitoramento", perm: "MARCAS_VIEW" },
       { href: "/analises", label: "Análises de IA", perm: "MARCAS_SEARCH" },
       { href: "/relatorios", label: "Relatórios", perm: "RELATORIOS_VIEW" },
@@ -221,6 +224,7 @@ function Icon({ name }: { name: string }) {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading, has } = useAuth();
+  const theme = useTheme();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -262,27 +266,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen lg:flex">
-      {/* Mobile top bar */}
-      <div className="flex items-center justify-between border-b border-gray-100 bg-white px-4 py-3 lg:hidden">
+      {/* Mobile top bar (blue hamburger) */}
+      <div
+        className="flex items-center justify-between border-b lg:hidden"
+        style={{ background: "var(--header-bg)", borderColor: "var(--border-color)" }}
+      >
         <button
           onClick={() => setOpen(true)}
-          className="rounded-lg border border-gray-200 p-2 text-slate-600"
+          className="flex items-center justify-center bg-brand-500 p-4 text-white hover:bg-brand-700"
           aria-label="Abrir menu"
         >
-          ☰
+          <svg width="20" height="15" viewBox="0 0 20 15" fill="currentColor" aria-hidden="true">
+            <path d="M0 0H20V2.5H0V0ZM0 6.25H20V8.75H0V6.25ZM0 12.5H20V15H0V12.5Z" />
+          </svg>
         </button>
-        <span className="font-bold text-brand-700">IntelliINPI</span>
+        <span className="font-bold" style={{ color: "var(--primary-color)" }}>
+          IntelliINPI
+        </span>
         <span className="w-9" />
       </div>
 
-      {/* Sidebar */}
+      {/* Sidebar — blue, full-height */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 transform overflow-y-auto scrollbar-thin bg-sidebar text-slate-200 transition-transform lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-64 transform overflow-y-auto scrollbar-thin bg-brand-500 text-white transition-transform lg:static lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
+        style={{ background: "var(--sidebar-bg)" }}
       >
         <div className="flex h-16 items-center gap-2 px-5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-sm font-bold text-white">
             II
           </span>
           <span className="text-lg font-bold text-white">IntelliINPI</span>
@@ -304,10 +316,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         setOpenGroup((v) => (v === n.href ? null : n.href));
                       }
                     }}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                      groupActive
-                        ? "bg-sidebar-hover text-white"
-                        : "text-sidebar-muted hover:bg-sidebar-light hover:text-white"
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white transition ${
+                      groupActive ? "bg-white/20" : "hover:bg-white/20"
                     }`}
                   >
                     <Icon name={n.icon} />
@@ -319,25 +329,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
-                      className={`transition-transform ${
-                        groupOpen ? "rotate-180" : ""
-                      }`}
+                      className={`transition-transform ${groupOpen ? "rotate-180" : ""}`}
                     >
                       <path d="m6 9 6 6 6-6" />
                     </svg>
                   </button>
                   {groupOpen && (
-                    <div className="mt-1 space-y-1 pl-9">
+                    <div
+                      className="mt-1 space-y-0.5 rounded-lg py-1"
+                      style={{ background: "var(--sidebar-active-bg)" }}
+                    >
                       {n.children
                         .filter((c) => !c.perm || has(c.perm))
                         .map((c) => (
                           <Link
                             key={c.href}
                             href={c.href}
-                            className={`block rounded-lg px-3 py-1.5 text-sm transition ${
+                            className={`block rounded-md px-3 py-2 pl-9 text-sm text-white transition ${
                               activeChild === c.href
-                                ? "bg-white/10 font-medium text-white"
-                                : "text-sidebar-muted hover:text-white"
+                                ? "bg-white/20 font-medium"
+                                : "text-white/90 hover:bg-white/20"
                             }`}
                           >
                             {c.label}
@@ -352,10 +363,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={n.href}
                 href={n.href}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  active
-                    ? "bg-sidebar-hover text-white"
-                    : "text-sidebar-muted hover:bg-sidebar-light hover:text-white"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-white transition ${
+                  active ? "bg-white/20" : "hover:bg-white/20"
                 }`}
               >
                 <Icon name={n.icon} />
@@ -369,24 +378,72 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Overlay (mobile) */}
       {open && (
         <div
-          className="fixed inset-0 z-30 bg-slate-900/50 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/25 lg:hidden"
           onClick={() => setOpen(false)}
         />
       )}
 
       {/* Main */}
       <div className="flex-1">
-        <header className="sticky top-0 z-20 border-b border-gray-100 bg-white/90 backdrop-blur">
+        <header
+          className="sticky top-0 z-20 border-b"
+          style={{
+            background: "var(--header-bg)",
+            borderColor: "var(--border-color)",
+            boxShadow: "3px 3px 19px var(--header-shadow)",
+          }}
+        >
           <div className="flex items-center justify-between gap-4 px-4 py-3 lg:px-8">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-800">
+              <p
+                className="truncate text-sm font-semibold"
+                style={{ color: "var(--text-main)" }}
+              >
                 {findActiveLabel(pathname, visibleNav)}
               </p>
-              <p className="truncate text-xs text-slate-400">
+              <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>
                 Plataforma de Propriedade Industrial
               </p>
             </div>
-            <UserMenu />
+
+            <div className="flex items-center gap-3">
+              {/* Theme toggle (sun/moon) — identical behaviour to Cerbero */}
+              <button
+                type="button"
+                onClick={theme.toggle}
+                aria-label={theme.isDark ? "Modo claro" : "Modo noturno"}
+                title={theme.isDark ? "Ativar modo claro" : "Ativar modo noturno"}
+                className="flex h-9 w-9 items-center justify-center rounded-full border transition hover:text-brand-500"
+                style={{
+                  borderColor: "var(--border-color)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {theme.isDark ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" />
+                    <path
+                      d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+
+              <UserMenu />
+            </div>
           </div>
         </header>
 

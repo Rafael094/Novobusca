@@ -90,6 +90,52 @@ def test_parse_marcas_xml_vazio_nao_quebra() -> None:
     assert parse_marcas_xml(b"<revista numero='9' data='01/02/2020'></revista>").numero == "9"
 
 
+def test_parse_marcas_xml_nome_imagem() -> None:
+    xml = (
+        '<revista numero="1" data="01/01/2020">'
+        '<processo numero="111111111">'
+        '<nome-imagem>111111111.jpg</nome-imagem>'
+        "</processo>"
+        '<processo numero="222222222">'
+        '<marca apresentacao="Mista"><nome>ALFA</nome>'
+        "<nome-imagem>figura.png</nome-imagem></marca>"
+        "</processo>"
+        '<processo numero="333333333" nome-imagem="pasta/333333333.jpg"/>'
+        '<processo numero="444444444"/>'
+        "</revista>"
+    )
+    processos = parse_marcas_xml(xml.encode()).processos
+
+    assert processos[0].nome_imagem == "111111111.jpg"
+    assert processos[0].tem_imagem is True
+    assert processos[1].nome_imagem == "figura.png"
+    # Atributo no processo (com caminho) é normalizado para o basename.
+    assert processos[2].nome_imagem == "333333333.jpg"
+    assert processos[3].nome_imagem is None
+    assert processos[3].tem_imagem is False
+
+
+def test_parse_marcas_xml_truncado_expoe_parse_error() -> None:
+    xml = (
+        '<revista numero="1" data="01/01/2020">'
+        '<processo numero="111111111">'
+        '<despachos><despacho codigo="IPAS009"/></despachos>'
+        "</processo>"
+    )
+    revista = parse_marcas_xml(xml.encode())
+
+    assert revista.numero == "1"
+    assert len(revista.processos) == 1
+    assert revista.parse_error is not None
+    assert "ParseError" in revista.parse_error
+
+
+def test_parse_marcas_xml_completo_nao_tem_parse_error() -> None:
+    revista = parse_marcas_xml(_MARCAS_XML.read_bytes())
+    assert revista.parse_error is None
+
+
+
 # --- Patentes (TXT) ---------------------------------------------------------
 def _patentes_bytes() -> bytes:
     # O arquivo oficial é latin-1; o fixture está em UTF-8 no disco.

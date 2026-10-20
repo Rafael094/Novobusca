@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import AppShell from "@/components/AppShell";
+import MarcaDetailModal from "@/components/MarcaDetailModal";
 import PageHeader from "@/components/PageHeader";
 import {
   Badge,
@@ -37,6 +38,8 @@ import type { Monitoramento, Paginated } from "@/lib/types";
 export default function MonitoramentoPage() {
   const [marcaPage, setMarcaPage] = useState(1);
   const [patentePage, setPatentePage] = useState(1);
+  // Marca whose detail modal is open (spec section 6: "Ver" opens the modal).
+  const [selectedMarca, setSelectedMarca] = useState<string | null>(null);
 
   const marcas = useMarcasMonitoramento(marcaPage, 20);
   const patentes = usePatentesMonitoramento(patentePage, 20);
@@ -125,6 +128,7 @@ export default function MonitoramentoPage() {
             isFetching={marcas.isFetching}
             page={marcaPage}
             onPage={setMarcaPage}
+            onView={(codigo) => setSelectedMarca(codigo)}
             busyId={
               toggleMarca.isPending ? toggleMarca.variables?.codigo : undefined
             }
@@ -146,6 +150,12 @@ export default function MonitoramentoPage() {
           />
         </div>
       )}
+
+      {/* Marca detail modal (spec section 6): "Ver" opens it in place. */}
+      <MarcaDetailModal
+        codigoInterno={selectedMarca}
+        onClose={() => setSelectedMarca(null)}
+      />
     </AppShell>
   );
 }
@@ -165,6 +175,7 @@ function MonitoramentoList({
   onPage,
   busyId,
   onRemove,
+  onView,
 }: {
   title: string;
   tipo: "marca" | "patente";
@@ -175,6 +186,7 @@ function MonitoramentoList({
   onPage: (next: number) => void;
   busyId?: string;
   onRemove: (codigo: string) => void;
+  onView?: (codigo: string) => void;
 }) {
   const items = data?.items ?? [];
   const total = data?.pagination.total ?? 0;
@@ -215,6 +227,7 @@ function MonitoramentoList({
             tone={tone}
             busy={busyId === m.codigo_interno}
             onRemove={() => onRemove(m.codigo_interno)}
+            onView={onView}
           />
         ))}
 
@@ -258,11 +271,13 @@ function MonitoramentoRow({
   tone,
   busy,
   onRemove,
+  onView,
 }: {
   m: Monitoramento;
   tone: "blue" | "slate";
   busy: boolean;
   onRemove: () => void;
+  onView?: (codigo: string) => void;
 }) {
   const isMarca = m.tipo !== "patente";
 
@@ -289,12 +304,24 @@ function MonitoramentoRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2 pt-0.5">
-        <Link
-          href={isMarca ? "/marcas" : "/patentes"}
-          className="text-xs font-medium text-brand-600 hover:text-brand-700"
-        >
-          Ver
-        </Link>
+        {isMarca ? (
+          // Section 6: "Ver" opens the marca detail modal in place — it no
+          // longer navigates to /marcas (which lost the selected item).
+          <button
+            type="button"
+            onClick={() => onView?.(m.codigo_interno)}
+            className="text-xs font-medium text-brand-600 hover:text-brand-700"
+          >
+            Ver
+          </button>
+        ) : (
+          <Link
+            href="/patentes"
+            className="text-xs font-medium text-brand-600 hover:text-brand-700"
+          >
+            Ver
+          </Link>
+        )}
         <button
           type="button"
           disabled={busy}

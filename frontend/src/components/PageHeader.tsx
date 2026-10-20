@@ -25,13 +25,13 @@ export function PageHeader({
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {breadcrumb && (
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide" style={{ color: "var(--text-faint)" }}>
             {breadcrumb}
           </p>
         )}
-        <h1 className="text-2xl font-bold text-slate-800">{title}</h1>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--text-main)" }}>{title}</h1>
         {description && (
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">{description}</p>
+          <p className="mt-1 max-w-3xl text-sm" style={{ color: "var(--text-muted)" }}>{description}</p>
         )}
       </div>
       {actions && (

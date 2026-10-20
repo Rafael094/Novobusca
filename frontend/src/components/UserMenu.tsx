@@ -61,15 +61,15 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Menu do usuário"
-        className="flex items-center gap-3 rounded-lg px-1 py-1 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+        className="flex items-center gap-3 rounded-lg px-1 py-1 transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
       >
         <div className="hidden text-right sm:block">
-          <p className="text-sm font-medium text-slate-800">{user.name}</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-sm font-medium" style={{ color: "var(--text-main)" }}>{user.name}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
             {user.is_master_admin ? "Master Admin" : user.tenant_name || "Sem tenant"}
           </p>
         </div>
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-500 text-sm font-semibold text-white">
           {initials}
         </span>
         <svg
@@ -80,9 +80,8 @@ export function UserMenu() {
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-          className={`hidden text-slate-400 transition-transform sm:block ${
-            open ? "rotate-180" : ""
-          }`}
+          className={`hidden transition-transform sm:block ${open ? "rotate-180" : ""}`}
+          style={{ color: "var(--text-faint)" }}
           aria-hidden="true"
         >
           <path d="m6 9 6 6 6-6" />
@@ -92,14 +91,15 @@ export function UserMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-soft"
+          className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border shadow-soft"
+          style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
         >
-          <div className="border-b border-gray-100 px-4 py-3">
-            <p className="truncate text-sm font-semibold text-slate-800">
+          <div className="border-b px-4 py-3" style={{ borderColor: "var(--border-color)" }}>
+            <p className="truncate text-sm font-semibold" style={{ color: "var(--text-main)" }}>
               {user.name}
             </p>
-            <p className="truncate text-xs text-slate-500">{user.email}</p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>{user.email}</p>
+            <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
               {user.is_master_admin
                 ? "Master Admin"
                 : user.tenant_name || "Sem tenant"}
@@ -111,7 +111,8 @@ export function UserMenu() {
               href="/perfil"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="block px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
+              className="block px-4 py-2 text-sm transition hover:bg-brand-50 hover:text-brand-700"
+              style={{ color: "var(--text-muted)" }}
             >
               Meu perfil
             </Link>
@@ -122,7 +123,8 @@ export function UserMenu() {
                   href="/admin/usuarios"
                   role="menuitem"
                   onClick={() => setOpen(false)}
-                  className="block px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
+                  className="block px-4 py-2 text-sm transition hover:bg-brand-50 hover:text-brand-700"
+                  style={{ color: "var(--text-muted)" }}
                 >
                   Usuários
                 </Link>
@@ -138,12 +140,13 @@ export function UserMenu() {
             )}
           </div>
 
-          <div className="border-t border-gray-100 py-1">
+          <div className="border-t py-1" style={{ borderColor: "var(--border-color)" }}>
             <button
               type="button"
               role="menuitem"
               onClick={handleLogout}
-              className="block w-full px-4 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-800"
+              className="block w-full px-4 py-2 text-left text-sm transition hover:bg-brand-50 hover:text-brand-700"
+              style={{ color: "var(--text-muted)" }}
             >
               Sair
             </button>

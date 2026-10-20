@@ -290,6 +290,42 @@ anti-join), então pode repetir à vontade. Em produção roda sozinho, em conta
 próprio (serviço `rpi` do `docker-compose.prod.yml`) — ver
 `docs/DEPLOY_ORACLE_VERCEL.md` §5.3.
 
+#### Imagens/logotipos das marcas da RPI
+
+O XML de Marcas referencia a figura de cada processo em `<nome-imagem>`. Depois
+de gravar os despachos, o worker baixa essas imagens em paralelo (`httpx` +
+`asyncio`, concorrência limitada e retry/backoff) e tenta, nesta ordem:
+
+1. busca pública — `https://busca.inpi.gov.br/marca/imagem/<processo>.jpg`;
+2. acervo da edição — `https://revistas.inpi.gov.br/rpi/images/<RPI>/<arquivo>`;
+3. fallback histórico — `.../marca/imagem/<3 primeiros dígitos>/<processo>.jpg`.
+
+Os bytes são validados por *magic number* (JPEG/PNG/WebP); HTML, GIF de
+placeholder e respostas corrompidas são rejeitados. O arquivo vai para o mesmo
+layout dos logotipos (`data/raw/marcas/logos/<2 primeiros caracteres>/<código>.jpg`)
+e a procedência (edição, processo, `nome-imagem`, URL de origem, sha256) fica em
+`marcas_rpi_imagens`; quando o `codigo_interno` já é conhecido, `marcas_logos`
+também é atualizado para a API servir na hora. `OK`/`SEM_IMAGEM` são terminais e
+`ERROR` volta na próxima rodada, então o processo é retomável.
+
+```powershell
+# o worker semanal já baixa as imagens; use --sem-imagens para desligar
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao marcas --sem-imagens
+
+# backfill/retomada de uma edição ou de todas as pendentes
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --rpi 2910
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --pendentes --limite 500
+
+# testar um processo específico e diagnosticar os hosts (não toca no banco)
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --rpi 2910 --processo 912345678
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --diagnostico --processo 912345678
+```
+
+Principais variáveis: `INPI_RPI_IMAGE_CONCURRENCY` (padrão 6),
+`INPI_RPI_IMAGE_DELAY` (0.05 s), `INPI_RPI_IMAGE_RETRIES` (3),
+`INPI_RPI_IMAGE_TIMEOUT` (30 s), `INPI_RPI_IMAGE_MAX_BYTES` (15 MiB) e
+`INPI_BUSCA_IMAGES_BASE_URL`.
+
 Relatório final: `reports/INPI_IMPORT_REPORT.md`
 
 ## Testes

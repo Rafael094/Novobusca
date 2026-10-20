@@ -54,7 +54,7 @@ export function StatCard({
   const body = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium text-slate-500">{label}</p>
+        <p className="text-sm font-medium" style={{ color: "var(--text-muted)" }}>{label}</p>
         {icon && (
           <span
             className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base ${TONE_CHIP[tone]}`}
@@ -64,22 +64,26 @@ export function StatCard({
           </span>
         )}
       </div>
-      <p className="mt-3 text-3xl font-bold leading-none text-slate-800">
+      <p className="mt-3 text-3xl font-bold leading-none" style={{ color: "var(--text-main)" }}>
         {displayed}
       </p>
-      {detail && <p className="mt-2 text-xs text-slate-500">{detail}</p>}
-      {period && !detail && <p className="mt-2 text-xs text-slate-400">{period}</p>}
-      {hint && <p className="mt-2 text-xs text-slate-400">{hint}</p>}
+      {detail && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{detail}</p>}
+      {period && !detail && <p className="mt-2 text-xs" style={{ color: "var(--text-faint)" }}>{period}</p>}
+      {hint && <p className="mt-2 text-xs" style={{ color: "var(--text-faint)" }}>{hint}</p>}
     </>
   );
 
-  const base =
-    "block rounded-xl border border-gray-100 bg-white p-5 shadow-card transition";
+  const base = "block rounded-xl border p-5 shadow-card transition";
+  const baseStyle: React.CSSProperties = {
+    background: "var(--bg-card)",
+    borderColor: "var(--border-color)",
+  };
 
   if (href) {
     return (
       <Link
         href={href}
+        style={baseStyle}
         className={`${base} hover:border-brand-200 hover:shadow-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500`}
         title={hint}
       >
@@ -87,7 +91,7 @@ export function StatCard({
       </Link>
     );
   }
-  return <div className={base}>{body}</div>;
+  return <div className={base} style={baseStyle}>{body}</div>;
 }
 
 export default StatCard;

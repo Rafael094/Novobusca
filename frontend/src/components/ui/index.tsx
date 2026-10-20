@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Shared UI primitives implementing the IntelliINPI design system:
- * light backgrounds, soft card borders (rounded-xl / border-gray-100),
- * vibrant #2563EB primary actions and semantic status badges.
+ * Shared UI primitives implementing the Cerbero design system:
+ * light/dark surfaces driven by CSS custom properties (globals.css), blue
+ * (#1A22CF) primary actions and semantic status badges. Every surface uses the
+ * theme variables so the components flip automatically in dark mode (body.dark).
  */
 
 import { useEffect, type ReactNode } from "react";
@@ -18,7 +19,8 @@ export function Card({
 }) {
   return (
     <div
-      className={`rounded-xl border border-gray-100 bg-white shadow-card ${className}`}
+      className={`rounded-xl border shadow-card ${className}`}
+      style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
     >
       {children}
     </div>
@@ -35,10 +37,19 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-5 py-4">
+    <div
+      className="flex items-start justify-between gap-3 border-b px-5 py-4"
+      style={{ borderColor: "var(--border-color)" }}
+    >
       <div>
-        <h2 className="font-semibold text-slate-800">{title}</h2>
-        {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+        <h2 className="font-semibold" style={{ color: "var(--text-main)" }}>
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="mt-0.5 text-sm" style={{ color: "var(--text-muted)" }}>
+            {subtitle}
+          </p>
+        )}
       </div>
       {action}
     </div>
@@ -105,9 +116,18 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
     "bg-brand-600 text-white hover:bg-brand-700 focus-visible:ring-brand-500",
   secondary:
-    "border border-gray-200 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-brand-500",
-  ghost: "text-slate-600 hover:bg-slate-100 focus-visible:ring-slate-400",
+    "border hover:bg-brand-50 focus-visible:ring-brand-500",
+  ghost: "hover:bg-brand-50 focus-visible:ring-brand-400",
   danger: "bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500",
+};
+
+const BUTTON_VARIANT_STYLE: Partial<Record<ButtonVariant, React.CSSProperties>> = {
+  secondary: {
+    background: "var(--bg-card)",
+    borderColor: "var(--border-color)",
+    color: "var(--text-main)",
+  },
+  ghost: { color: "var(--text-muted)" },
 };
 
 export function Button({
@@ -121,6 +141,7 @@ export function Button({
   return (
     <button
       {...props}
+      style={{ ...BUTTON_VARIANT_STYLE[variant], ...(props.style || {}) }}
       className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 ${BUTTON_VARIANTS[variant]} ${className}`}
     >
       {children}
@@ -130,7 +151,12 @@ export function Button({
 
 // --- Inputs -----------------------------------------------------------------
 const FIELD_CLASS =
-  "w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+  "w-full rounded-lg border px-3 py-2 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100";
+const FIELD_STYLE: React.CSSProperties = {
+  background: "var(--bg-input)",
+  borderColor: "var(--border-color)",
+  color: "var(--text-main)",
+};
 
 export function Input({
   label,
@@ -140,11 +166,11 @@ export function Input({
   return (
     <label className="block">
       {label && (
-        <span className="mb-1 block text-sm font-medium text-slate-700">
+        <span className="mb-1 block text-sm font-medium" style={{ color: "var(--text-main)" }}>
           {label}
         </span>
       )}
-      <input {...props} className={`${FIELD_CLASS} ${className}`} />
+      <input {...props} style={FIELD_STYLE} className={`${FIELD_CLASS} ${className}`} />
     </label>
   );
 }
@@ -157,11 +183,11 @@ export function Textarea({
   return (
     <label className="block">
       {label && (
-        <span className="mb-1 block text-sm font-medium text-slate-700">
+        <span className="mb-1 block text-sm font-medium" style={{ color: "var(--text-main)" }}>
           {label}
         </span>
       )}
-      <textarea {...props} className={`${FIELD_CLASS} ${className}`} />
+      <textarea {...props} style={FIELD_STYLE} className={`${FIELD_CLASS} ${className}`} />
     </label>
   );
 }
@@ -175,11 +201,11 @@ export function Select({
   return (
     <label className="block">
       {label && (
-        <span className="mb-1 block text-sm font-medium text-slate-700">
+        <span className="mb-1 block text-sm font-medium" style={{ color: "var(--text-main)" }}>
           {label}
         </span>
       )}
-      <select {...props} className={`${FIELD_CLASS} ${className}`}>
+      <select {...props} style={FIELD_STYLE} className={`${FIELD_CLASS} ${className}`}>
         {children}
       </select>
     </label>
@@ -246,12 +272,21 @@ export function Modal({
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-lg rounded-xl border border-gray-100 bg-white shadow-soft">
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-          <h3 className="font-semibold text-slate-800">{title}</h3>
+      <div
+        className="relative z-10 w-full max-w-lg rounded-xl border shadow-soft"
+        style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
+      >
+        <div
+          className="flex items-center justify-between border-b px-5 py-4"
+          style={{ borderColor: "var(--border-color)" }}
+        >
+          <h3 className="font-semibold" style={{ color: "var(--text-main)" }}>
+            {title}
+          </h3>
           <button
             onClick={onClose}
-            className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="rounded-lg p-1 hover:text-brand-500"
+            style={{ color: "var(--text-muted)" }}
             aria-label="Fechar"
           >
             ✕
@@ -261,7 +296,10 @@ export function Modal({
           {children}
         </div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
+          <div
+            className="flex justify-end gap-2 border-t px-5 py-4"
+            style={{ borderColor: "var(--border-color)" }}
+          >
             {footer}
           </div>
         )}
@@ -288,7 +326,8 @@ export function Th({
 }) {
   return (
     <th
-      className={`whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 ${className}`}
+      className={`whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide ${className}`}
+      style={{ color: "var(--text-muted)" }}
     >
       {children}
     </th>
@@ -303,7 +342,10 @@ export function Td({
   className?: string;
 }) {
   return (
-    <td className={`px-4 py-3 align-middle text-slate-600 ${className}`}>
+    <td
+      className={`px-4 py-3 align-middle ${className}`}
+      style={{ color: "var(--text-muted)" }}
+    >
       {children}
     </td>
   );
@@ -312,7 +354,7 @@ export function Td({
 export function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-4 py-10 text-center text-slate-400">
+      <td colSpan={colSpan} className="px-4 py-10 text-center" style={{ color: "var(--text-faint)" }}>
         {message}
       </td>
     </tr>
@@ -335,7 +377,10 @@ export function Pagination({
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-3 text-sm text-slate-500">
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm"
+      style={{ borderColor: "var(--border-color)", color: "var(--text-muted)" }}
+    >
       <span>
         {from}–{to} de {total.toLocaleString("pt-BR")}
       </span>
@@ -348,7 +393,7 @@ export function Pagination({
         >
           Anterior
         </Button>
-        <span className="px-2 text-slate-600">
+        <span className="px-2" style={{ color: "var(--text-main)" }}>
           {page} / {totalPages}
         </span>
         <Button
@@ -375,7 +420,7 @@ export function Tabs({
   onChange: (id: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-1 border-b border-gray-100">
+    <div className="flex flex-wrap gap-1 border-b" style={{ borderColor: "var(--border-color)" }}>
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -383,8 +428,9 @@ export function Tabs({
           className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition ${
             active === t.id
               ? "border-brand-600 text-brand-700"
-              : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
+              : "border-transparent hover:border-brand-300"
           }`}
+          style={active === t.id ? undefined : { color: "var(--text-muted)" }}
         >
           {t.label}
         </button>
@@ -403,16 +449,18 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1 py-12 text-center">
-      <p className="font-medium text-slate-600">{title}</p>
-      {description && <p className="text-sm text-slate-400">{description}</p>}
+      <p className="font-medium" style={{ color: "var(--text-main)" }}>{title}</p>
+      {description && (
+        <p className="text-sm" style={{ color: "var(--text-faint)" }}>{description}</p>
+      )}
     </div>
   );
 }
 
 export function Spinner({ label = "Carregando…" }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+    <div className="flex items-center gap-2 py-6 text-sm" style={{ color: "var(--text-muted)" }}>
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
       {label}
     </div>
   );

@@ -51,6 +51,22 @@ class IngestionConfig:
     # Petições do pePI (página de detalhe) — knobs separados dos logotipos.
     pepi_concurrency: int = 4
     pepi_delay_seconds: float = 0.25
+    # Imagens/logotipos referenciados pelo XML da RPI (endpoints /marca/imagem
+    # e /rpi/images). Knobs separados: a RPI tem milhares de figuras por edição
+    # e um ritmo próprio para não estourar o rate limit do INPI.
+    busca_images_base_url: str = "https://busca.inpi.gov.br/marca/imagem"
+    # Endpoint público das figuras de Desenho Industrial. O INPI mudou o
+    # caminho algumas vezes; o fallback para o acervo /rpi/images cobre isso.
+    desenho_images_base_url: str = "https://busca.inpi.gov.br/pe/imagem"
+    rpi_image_concurrency: int = 6
+    rpi_image_delay_seconds: float = 0.05
+    rpi_image_retries: int = 3
+    rpi_image_timeout_seconds: float = 30.0
+    rpi_image_max_bytes: int = 15 * 1024 * 1024
+    rpi_image_user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
 
     @property
     def psycopg_dsn(self) -> str:
@@ -74,6 +90,11 @@ class IngestionConfig:
     def logos_dir(self) -> Path:
         """Where marca logotipo images are stored on disk."""
         return self.data_dir / "raw" / "marcas" / "logos"
+
+    @property
+    def desenho_figuras_dir(self) -> Path:
+        """Where Desenho Industrial figures downloaded from the RPI are stored."""
+        return self.data_dir / "raw" / "desenhos" / "figuras"
 
     @property
     def rpi_dir(self) -> Path:
@@ -112,6 +133,14 @@ def load_config() -> IngestionConfig:
         os.environ.get("INPI_RPI_BASE_URL"),
         default="https://revistas.inpi.gov.br",
     )
+    busca_images_base_url = _first(
+        os.environ.get("INPI_BUSCA_IMAGES_BASE_URL"),
+        default="https://busca.inpi.gov.br/marca/imagem",
+    ).rstrip("/")
+    desenho_images_base_url = _first(
+        os.environ.get("INPI_DESENHO_IMAGES_BASE_URL"),
+        default="https://busca.inpi.gov.br/pe/imagem",
+    ).rstrip("/")
 
     # Resolve the data dir relative to the repository root (project root), not
     # the current working directory, so CLI and server both land in the same spot.
@@ -134,6 +163,26 @@ def load_config() -> IngestionConfig:
         logo_delay_seconds=float(os.environ.get("INPI_LOGO_DELAY", "0.15")),
         pepi_concurrency=int(os.environ.get("INPI_PEPI_CONCURRENCY", "4")),
         pepi_delay_seconds=float(os.environ.get("INPI_PEPI_DELAY", "0.25")),
+        busca_images_base_url=busca_images_base_url,
+        desenho_images_base_url=desenho_images_base_url,
+        rpi_image_concurrency=int(os.environ.get("INPI_RPI_IMAGE_CONCURRENCY", "6")),
+        rpi_image_delay_seconds=float(
+            os.environ.get("INPI_RPI_IMAGE_DELAY", "0.05")
+        ),
+        rpi_image_retries=int(os.environ.get("INPI_RPI_IMAGE_RETRIES", "3")),
+        rpi_image_timeout_seconds=float(
+            os.environ.get("INPI_RPI_IMAGE_TIMEOUT", "30")
+        ),
+        rpi_image_max_bytes=int(
+            os.environ.get("INPI_RPI_IMAGE_MAX_BYTES", str(15 * 1024 * 1024))
+        ),
+        rpi_image_user_agent=_first(
+            os.environ.get("INPI_RPI_IMAGE_USER_AGENT"),
+            default=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            ),
+        ),
     )
     return cfg
 

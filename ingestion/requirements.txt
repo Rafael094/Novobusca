@@ -1,5 +1,6 @@
 # Ingestion pipeline dependencies.
 # These complement the backend requirements (shared virtualenv).
 duckdb==1.1.3
+httpx==0.28.1
 requests==2.32.3
 psycopg[binary]==3.2.3

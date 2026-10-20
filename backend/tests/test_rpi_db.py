@@ -28,7 +28,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from app.models import Marca, MarcaDespacho, Patente, PatenteDespacho  # noqa: E402
+from app.models import (
+    Marca,
+    MarcaDespacho,
+    MarcaRpiImagem,
+    Patente,
+    PatenteDespacho,
+)  # noqa: E402
 
 from ingestion import db as ing_db  # noqa: E402
 from ingestion import rpi as ing_rpi  # noqa: E402
@@ -159,6 +165,66 @@ def test_insert_marcas_despachos_conserva_o_que_ja_veio_do_csv(db) -> None:
     assert db.execute(select(func.count()).select_from(MarcaDespacho)).scalar() == 2
 
 
+# --- Imagens da RPI (procedência / resume) ----------------------------------
+def test_upsert_rpi_imagem_e_pendentes(db) -> None:
+    ing_db.upsert_rpi_imagem(
+        numero_rpi=_RPI,
+        numero_processo="111111111",
+        nome_imagem="111111111.jpg",
+        status="PENDING",
+    )
+    assert [r["numero_processo"] for r in ing_db.rpi_imagens_pendentes()] == [
+        "111111111"
+    ]
+
+    # Concluir remove da fila (OK é terminal) e preenche a procedência.
+    ing_db.upsert_rpi_imagem(
+        numero_rpi=_RPI,
+        numero_processo="111111111",
+        nome_imagem="111111111.jpg",
+        codigo_interno="4482935",
+        status="OK",
+        arquivo="raw/marcas/logos/44/4482935.jpg",
+        mime="image/jpeg",
+        bytes_=1234,
+        sha256="a" * 64,
+        origem_url="https://busca.inpi.gov.br/marca/imagem/111111111.jpg",
+    )
+    assert ing_db.rpi_imagens_pendentes() == []
+
+    # ERROR volta na próxima rodada.
+    ing_db.upsert_rpi_imagem(
+        numero_rpi=_RPI,
+        numero_processo="222222222",
+        status="ERROR",
+        erro="HTTP 503",
+    )
+    pendentes = ing_db.rpi_imagens_pendentes(numero_rpi=_RPI)
+    assert [r["numero_processo"] for r in pendentes] == ["222222222"]
+    assert ing_db.rpi_imagens_pendentes(numero_rpi="9999") == []
+
+    # COALESCE: uma atualização sem nome-imagem/código não apaga o que já havia.
+    ing_db.upsert_rpi_imagem(
+        numero_rpi=_RPI,
+        numero_processo="111111111",
+        status="OK",
+        codigo_interno=None,
+        nome_imagem=None,
+    )
+    db.commit()
+    row = db.execute(
+        select(MarcaRpiImagem).where(
+            MarcaRpiImagem.numero_rpi == _RPI,
+            MarcaRpiImagem.numero_processo == "111111111",
+        )
+    ).scalar_one()
+    assert row.codigo_interno == "4482935"
+    assert row.nome_imagem == "111111111.jpg"
+    assert row.arquivo == "raw/marcas/logos/44/4482935.jpg"
+    assert ing_db.get_rpi_imagem(_RPI, "111111111")["status"] == "OK"
+    assert ing_db.get_rpi_imagem(_RPI, "000000000") is None
+
+
 # --- Estado em inpi_rpi -----------------------------------------------------
 def test_upsert_e_get_rpi_preserva_metadata(db) -> None:
     ing_db.upsert_rpi(
@@ -284,6 +350,27 @@ def test_process_edition_patentes_ponta_a_ponta(db, rpi_tmp) -> None:
     assert {d.codigo_despacho for d in despachos} == {"3.1", "16.1"}
     complementos = {d.complemento_despacho for d in despachos}
     assert "Concessão de patente" in complementos
+
+
+def test_process_edition_xml_truncado_failed_e_remove_zip(db, rpi_tmp) -> None:
+    """XML truncado não pode virar delta parcial PROCESSED; o ZIP é descartado."""
+    truncated = _MARCAS_XML.read_bytes()[:200]
+    (rpi_tmp / "RM2910.zip").write_bytes(_zip_bytes("RM2910.xml", truncated))
+    edition = ing_rpi.Edition(
+        section="marcas",
+        numero=_RPI,
+        data=_DATA_RPI,
+        nome_arquivo_escritorio="RM2910.zip",
+    )
+
+    stats = ing_rpi.process_edition(requests.Session(), edition)
+
+    assert stats["status"] == "FAILED"
+    assert "truncado" in stats["erro"] or "corrompido" in stats["erro"]
+    assert not (rpi_tmp / "RM2910.zip").exists()
+    row = ing_db.get_rpi(_RPI)
+    assert row["status"] == "FAILED"
+    assert row["metadata"]["sections"]["marcas"]["status"] == "FAILED"
 
 
 def test_process_edition_sem_arquivo_marca_failed(db, rpi_tmp) -> None:
