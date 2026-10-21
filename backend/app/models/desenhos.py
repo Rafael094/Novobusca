@@ -202,3 +202,43 @@ class DesenhoFigura(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tentativas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     erro: Mapped[str | None] = mapped_column(Text)
     baixado_em: Mapped[datetime | None] = mapped_column()
+
+
+class DesenhoRpiFigura(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Procedência de uma figura de DI referenciada pelo XML da RPI.
+
+    ``desenhos_figuras`` é a fonte que a API lê; esta tabela registra **de qual
+    edição/processo/arquivo** a imagem veio, inclusive quando o processo ainda
+    não existe no dump de ``desenhos`` (``codigo_interno`` nulo). Isso permite
+    auditoria, resume por edição e reprocessamento sem baixar tudo de novo.
+
+    ``status`` segue o mesmo vocabulário de ``desenhos_figuras``:
+    ``PENDING``/``OK``/``SEM_IMAGEM``/``ERROR``. ``OK``/``SEM_IMAGEM`` são
+    terminais no resume; ``ERROR`` volta na próxima rodada.
+    """
+
+    __tablename__ = "desenhos_rpi_figuras"
+    __table_args__ = (
+        UniqueConstraint(
+            "numero_rpi",
+            "numero_processo",
+            name="uq_desenhos_rpi_figuras_rpi_processo",
+        ),
+        Index("ix_desenhos_rpi_figuras_status", "status"),
+        Index("ix_desenhos_rpi_figuras_processo", "numero_processo"),
+        Index("ix_desenhos_rpi_figuras_codigo", "codigo_interno"),
+    )
+
+    numero_rpi: Mapped[str] = mapped_column(String(32), nullable=False)
+    numero_processo: Mapped[str] = mapped_column(String(32), nullable=False)
+    nome_imagem: Mapped[str | None] = mapped_column(String(255))
+    codigo_interno: Mapped[str | None] = mapped_column(String(64))
+    arquivo: Mapped[str | None] = mapped_column(Text)
+    mime: Mapped[str | None] = mapped_column(String(64))
+    bytes: Mapped[int | None] = mapped_column(BigInteger)
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    tentativas: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    erro: Mapped[str | None] = mapped_column(Text)
+    origem_url: Mapped[str | None] = mapped_column(Text)
+    baixado_em: Mapped[datetime | None] = mapped_column()

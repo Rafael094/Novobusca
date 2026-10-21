@@ -5,7 +5,9 @@
 --   * Desenhos Industriais
 --   * Programas de Computador (Softwares)
 --
--- Equivale à migration Alembic `f1a2b3c4d5e7_add_desenhos_software.py`.
+-- Equivale às migrations Alembic:
+--   * f1a2b3c4d5e7_add_desenhos_software.py
+--   * b7c9d1e2f3a4_add_desenhos_rpi_figuras.py
 --
 -- COMO USAR (PostgreSQL)
 --   psql -U postgres -d intelliinpi_app -f database/06_desenhos_softwares.sql
@@ -25,9 +27,10 @@
 --   como aplicada para o `alembic upgrade head` não tentar recriar as tabelas:
 --
 --       cd backend
---       alembic stamp f1a2b3c4d5e7
+--       alembic stamp b7c9d1e2f3a4
 --
---   A migration seguinte (a9b8c7d6e5f4 - marcas_rpi_imagens) continua normal.
+--   Se o banco já estava em a9b8c7d6e5f4, basta `alembic stamp b7c9d1e2f3a4`
+--   depois de criar `desenhos_rpi_figuras` (ou rodar a migration normalmente).
 --
 --   Alternativa recomendada quando o Alembic está disponível:
 --       alembic upgrade head
@@ -172,6 +175,30 @@ CREATE TABLE IF NOT EXISTS desenhos_figuras (
     updated_at      timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT desenhos_figuras_pkey PRIMARY KEY (id),
     CONSTRAINT uq_desenhos_figuras_codigo_interno UNIQUE (codigo_interno)
+);
+
+-- Procedência das figuras de DI referenciadas pelo XML semanal da RPI.
+-- Espelha marcas_rpi_imagens (migration b7c9d1e2f3a4).
+CREATE TABLE IF NOT EXISTS desenhos_rpi_figuras (
+    numero_rpi      varchar(32) NOT NULL,
+    numero_processo varchar(32) NOT NULL,
+    nome_imagem     varchar(255),
+    codigo_interno  varchar(64),
+    arquivo         text,
+    mime            varchar(64),
+    bytes           bigint,
+    sha256          varchar(64),
+    status          varchar(16) NOT NULL DEFAULT 'PENDING',
+    tentativas      integer NOT NULL DEFAULT 0,
+    erro            text,
+    origem_url      text,
+    baixado_em      timestamptz,
+    id              uuid NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT desenhos_rpi_figuras_pkey PRIMARY KEY (id),
+    CONSTRAINT uq_desenhos_rpi_figuras_rpi_processo
+        UNIQUE (numero_rpi, numero_processo)
 );
 
 -- Monitoramento seletivo por usuário/tenant
@@ -365,6 +392,15 @@ CREATE INDEX IF NOT EXISTS ix_desenhos_fig_codigo_interno
 
 CREATE INDEX IF NOT EXISTS ix_desenhos_fig_status
     ON desenhos_figuras (status);
+
+CREATE INDEX IF NOT EXISTS ix_desenhos_rpi_figuras_status
+    ON desenhos_rpi_figuras (status);
+
+CREATE INDEX IF NOT EXISTS ix_desenhos_rpi_figuras_processo
+    ON desenhos_rpi_figuras (numero_processo);
+
+CREATE INDEX IF NOT EXISTS ix_desenhos_rpi_figuras_codigo
+    ON desenhos_rpi_figuras (codigo_interno);
 
 CREATE INDEX IF NOT EXISTS ix_desenhos_monitoramento_tenant
     ON desenhos_monitoramento (tenant_id);

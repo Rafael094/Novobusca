@@ -194,7 +194,8 @@ def discover(session: requests.Session, section: str, *, dias: int = 30) -> list
             continue
         numero = str(item["numero"])
         nome_escritorio = item.get("nomeArquivoEscritorio")
-        if not nome_escritorio:
+        if not nome_escritorio and section in {"desenho_industrial", "software"}:
+            # Essas seções não informam o ZIP de texto no JSON do portal.
             nome_escritorio = _nome_arquivo_padrao(section, numero)
         editions.append(
             Edition(
@@ -278,9 +279,13 @@ def download_edition(
     arquivo para não parsear HTML como se fosse uma edição.
     """
     section = normalize_section(edition.section)
-    nome = edition.nome_arquivo_escritorio or _nome_arquivo_padrao(
-        section, edition.numero
-    )
+    nome = edition.nome_arquivo_escritorio
+    if not nome and section in {"desenho_industrial", "software"}:
+        nome = _nome_arquivo_padrao(section, edition.numero)
+    if not nome:
+        raise ValueError(
+            f"RPI {edition.numero} ({section}) sem arquivo de texto"
+        )
     url = f"{CONFIG.rpi_base_url}/txt/{nome}"
     dest = CONFIG.rpi_dir / nome
     if force:
@@ -395,14 +400,207 @@ def patentes_rows(
     return rows
 
 
+def _last_despacho(processo) -> tuple[str | None, str | None]:
+    for despacho in reversed(processo.despachos):
+        if despacho.codigo:
+            return despacho.codigo, despacho.nome
+    return None, None
+
+
+def _pessoa_row(pessoa, index: int) -> dict:
+    return {
+        "nome": pessoa.nome,
+        "ordem": pessoa.ordem or str(index),
+        "pais": pessoa.pais,
+        "estado": pessoa.estado,
+        "cpf_cnpj": pessoa.cpf_cnpj,
+        "tipo_pessoa": pessoa.tipo_pessoa,
+    }
+
+
+def desenhos_payloads(
+    processos: Iterable[ProcessoDesenho],
+    digitos: dict[str, tuple[str, str]],
+    *,
+    data_rpi: date | None = None,
+) -> tuple[list[dict], dict[str, list[str]]]:
+    """Monta os dados bibliográficos/filhos de DI e o mapa para as imagens.
+
+    Devolve ``(payloads, codigos_por_numero)``. Só entram processos casados com
+    o dump (a RPI não publica o ``codigo_interno``); os demais continuam
+    disponíveis para as referências de imagem, mas não geram linha no banco.
+    """
+    payloads: list[dict] = []
+    codigos: dict[str, list[str]] = {}
+    for proc in processos:
+        match = digitos.get(process_key(proc.numero))
+        if not match:
+            continue
+        codigo_interno, numero_inpi = match
+        codigo_situacao, descricao_situacao = _last_despacho(proc)
+        payloads.append(
+            {
+                "codigo_interno": codigo_interno,
+                "numero_inpi": numero_inpi,
+                "data_deposito": proc.data_deposito,
+                "data_concessao": proc.data_concessao,
+                "data_publicacao": proc.data_publicacao or data_rpi,
+                "titulo": proc.titulo,
+                "codigo_situacao": codigo_situacao,
+                "descricao_situacao": descricao_situacao,
+                "titulares": [
+                    _pessoa_row(p, i) for i, p in enumerate(proc.titulares, 1)
+                ],
+                "autores": [
+                    _pessoa_row(p, i) for i, p in enumerate(proc.autores, 1)
+                ],
+                "procuradores": [
+                    _pessoa_row(p, i) for i, p in enumerate(proc.procuradores, 1)
+                ],
+                "classificacoes": [
+                    {"ordem": str(i), "classificacao_locarno": value}
+                    for i, value in enumerate(proc.classificacoes, 1)
+                ],
+                "prioridades": [
+                    {
+                        "pais_prioridade": p.pais,
+                        "numero_prioridade": p.numero,
+                        "data_prioridade": p.data,
+                    }
+                    for p in proc.prioridades
+                ],
+                "vinculos": [
+                    {
+                        "codigo_interno_derivado": (
+                            digitos.get(process_key(v.numero)) or (None, None)
+                        )[0],
+                        "numero_inpi_derivado": (
+                            digitos.get(process_key(v.numero)) or (None, None)
+                        )[1]
+                        or v.numero,
+                        "data_vinculo": v.data,
+                        "tipo_vinculo": v.tipo,
+                    }
+                    for v in proc.vinculos
+                ],
+            }
+        )
+        codigos[proc.numero] = [codigo_interno]
+    return payloads, codigos
+
+
+def desenhos_rows(
+    processos: Iterable[ProcessoDesenho],
+    digitos: dict[str, tuple[str, str]],
+) -> list[dict]:
+    """Expande os processos de DI em linhas de ``desenhos_despachos``."""
+    rows: list[dict] = []
+    for proc in processos:
+        match = digitos.get(process_key(proc.numero))
+        if not match:
+            continue
+        codigo_interno, numero_inpi = match
+        for despacho in proc.despachos:
+            rows.append(
+                {
+                    "codigo_interno": codigo_interno,
+                    "numero_inpi": numero_inpi,
+                    "codigo_despacho": despacho.codigo,
+                    "descricao_despacho": despacho.nome,
+                    "complemento_despacho": despacho.complemento,
+                }
+            )
+    return rows
+
+
+def softwares_payloads(
+    processos: Iterable[ProcessoSoftware],
+    digitos: dict[str, tuple[str, str]],
+    *,
+    data_rpi: date | None = None,
+) -> tuple[list[dict], dict[str, list[str]]]:
+    """Monta os dados bibliográficos/filhos de Programas de Computador."""
+    payloads: list[dict] = []
+    codigos: dict[str, list[str]] = {}
+    for proc in processos:
+        match = digitos.get(process_key(proc.numero))
+        if not match:
+            continue
+        codigo_interno, numero_inpi = match
+        codigo_situacao, descricao_situacao = _last_despacho(proc)
+        tipos = [{"tipo": value, "campo_aplicacao": None} for value in proc.tipos_programa]
+        tipos += [
+            {"tipo": None, "campo_aplicacao": value}
+            for value in proc.campos_aplicacao
+        ]
+        campos = [
+            {"campo": "Campo de aplicação", "valor": value}
+            for value in proc.campos_aplicacao
+        ]
+        campos += [
+            {"campo": "Tipo de programa", "valor": value}
+            for value in proc.tipos_programa
+        ]
+        payloads.append(
+            {
+                "codigo_interno": codigo_interno,
+                "numero_inpi": numero_inpi,
+                "data_criacao": proc.data_criacao,
+                "data_publicacao": proc.data_publicacao or data_rpi,
+                "titulo": proc.titulo,
+                "codigo_situacao": codigo_situacao,
+                "descricao_situacao": descricao_situacao,
+                "titulares": [
+                    _pessoa_row(p, i) for i, p in enumerate(proc.titulares, 1)
+                ],
+                "autores": [
+                    _pessoa_row(p, i) for i, p in enumerate(proc.autores, 1)
+                ],
+                "linguagens": list(proc.linguagens),
+                "tipos": tipos,
+                "campos": campos,
+            }
+        )
+        codigos[proc.numero] = [codigo_interno]
+    return payloads, codigos
+
+
+def softwares_rows(
+    processos: Iterable[ProcessoSoftware],
+    digitos: dict[str, tuple[str, str]],
+) -> list[dict]:
+    """Expande os processos de software em linhas de ``softwares_despachos``."""
+    rows: list[dict] = []
+    for proc in processos:
+        match = digitos.get(process_key(proc.numero))
+        if not match:
+            continue
+        codigo_interno, numero_inpi = match
+        for despacho in proc.despachos:
+            rows.append(
+                {
+                    "codigo_interno": codigo_interno,
+                    "numero_inpi": numero_inpi,
+                    "codigo_despacho": despacho.codigo,
+                    "descricao_despacho": despacho.nome,
+                    "complemento_despacho": despacho.complemento,
+                }
+            )
+    return rows
+
+
+_DESPACHO_INSERTERS = {
+    "marcas": db.insert_marcas_despachos,
+    "patentes": db.insert_patentes_despachos,
+    "desenho_industrial": db.insert_desenhos_despachos,
+    "software": db.insert_softwares_despachos,
+}
+
+
 def _insert_in_chunks(
     section: str, *, numero_rpi: str, data_rpi: date | None, rows: list[dict]
 ) -> int:
-    insert = (
-        db.insert_marcas_despachos
-        if section == "marcas"
-        else db.insert_patentes_despachos
-    )
+    insert = _DESPACHO_INSERTERS[normalize_section(section)]
     total = 0
     for start in range(0, len(rows), _CHUNK):
         chunk = rows[start : start + _CHUNK]
@@ -441,13 +639,19 @@ def _save_state(
     meta["sections"] = sections
 
     has_raw = raw_path is not None and raw_path.exists()
-    file_name = edition.nome_arquivo_escritorio or existing.get("file_name")
+    if edition.nome_arquivo_escritorio:
+        nome_padrao = edition.nome_arquivo_escritorio
+    elif edition.section in {"desenho_industrial", "software"}:
+        nome_padrao = _nome_arquivo_padrao(edition.section, edition.numero)
+    else:
+        nome_padrao = None
+    file_name = nome_padrao or existing.get("file_name")
     file_size = raw_path.stat().st_size if has_raw else existing.get("file_size")
     sha256 = _sha256(raw_path) if has_raw else existing.get("sha256")
     raw_path_value = str(raw_path) if raw_path else existing.get("raw_path")
     source_url = (
-        f"{CONFIG.rpi_base_url}/txt/{edition.nome_arquivo_escritorio}"
-        if edition.nome_arquivo_escritorio
+        f"{CONFIG.rpi_base_url}/txt/{nome_padrao}"
+        if nome_padrao
         else existing.get("source_url")
     )
 
@@ -479,40 +683,47 @@ def process_edition(
 ) -> dict:
     """Baixa, parseia e grava uma edição; devolve um resumo (stats).
 
-    Para Marcas, após gravar os despachos, dispara o pipeline assíncrono de
-    imagens (:mod:`ingestion.rpi_images`) dos processos com ``<nome-imagem>``.
-    Falhas de imagem **não** invalidam a edição: os despachos já estão
-    persistidos e as imagens ficam como ``PENDING``/``ERROR`` para retry em
-    ``python -m ingestion.rpi_images --pendentes``.
+    Suporta Marcas, Patentes, Desenhos Industriais e Programas de Computador.
+    Para Marcas e Desenhos, após gravar os despachos, dispara o pipeline
+    assíncrono de imagens (:mod:`ingestion.rpi_images`). Falhas de imagem
+    **não** invalidam a edição: os despachos já estão persistidos e as imagens
+    ficam como ``PENDING``/``ERROR`` para retry em
+    ``python -m ingestion.rpi_images --pendentes --secao ...``.
     """
-    state = _section_state(edition.numero, edition.section)
+    edition.section = normalize_section(edition.section)
+    section = edition.section
+    state = _section_state(edition.numero, section)
     if state.get("status") == PROCESSED and not force:
         logger.info(
             "RPI %s (%s): já processada (%s despachos) — pulando.",
             edition.numero,
-            edition.section,
+            section,
             state.get("despachos"),
         )
         # Mesmo com a edição concluída, imagens que ficaram ERROR/PENDING numa
         # rodada anterior precisam de nova tentativa (o laço do compose chama
         # o worker de novo a cada 6 h; sem isso elas nunca seriam retomadas).
-        if edition.section == "marcas" and baixar_imagens:
+        if section in {"marcas", "desenho_industrial"} and baixar_imagens:
             try:
                 pendentes = run_pending(
-                    numero_rpi=edition.numero, **(image_options or {})
+                    numero_rpi=edition.numero,
+                    section=section,
+                    **(image_options or {}),
                 )
             except Exception as exc:  # noqa: BLE001 - não invalida a edição
                 logger.exception(
-                    "RPI %s (marcas): falha ao retomar imagens pendentes",
+                    "RPI %s (%s): falha ao retomar imagens pendentes",
                     edition.numero,
+                    section,
                 )
                 logger.debug("Detalhe: %s", exc)
             else:
                 if pendentes.get("pendentes"):
                     logger.info(
-                        "RPI %s (marcas): imagens pendentes ok=%s sem_imagem=%s "
+                        "RPI %s (%s): imagens pendentes ok=%s sem_imagem=%s "
                         "erro=%s (de %s).",
                         edition.numero,
+                        section,
                         pendentes.get("OK", 0),
                         pendentes.get("SEM_IMAGEM", 0),
                         pendentes.get("ERROR", 0),
@@ -520,14 +731,14 @@ def process_edition(
                     )
         return {"status": "SKIPPED"}
 
-    logger.info("RPI %s (%s): processando...", edition.numero, edition.section)
+    logger.info("RPI %s (%s): processando...", edition.numero, section)
     _save_state(edition, status=PROCESSING, state={"status": PROCESSING})
 
     try:
         raw_path = download_edition(session, edition)
     except Exception as exc:  # noqa: BLE001 - erro de rede/portal vira FAILED
         logger.error(
-            "RPI %s (%s): falha no download: %s", edition.numero, edition.section, exc
+            "RPI %s (%s): falha no download: %s", edition.numero, section, exc
         )
         _save_state(
             edition,
@@ -537,41 +748,32 @@ def process_edition(
         )
         return {"status": FAILED, "erro": str(exc)}
 
-    try:
-        if edition.section == "marcas":
-            try:
-                revista = _read_marcas_zip(raw_path, edition.numero)
-            except (zipfile.BadZipFile, ValueError):
-                # ZIP truncado/corrompido ou sem o XML esperado (rodada
-                # anterior interrompida): descarta e baixa de novo uma única
-                # vez antes de desistir.
-                logger.warning(
-                    "RPI %s (marcas): ZIP inválido em %s — baixando novamente.",
-                    edition.numero,
-                    raw_path,
-                )
-                raw_path.unlink(missing_ok=True)
-                raw_path = download_edition(session, edition, force=True)
-                try:
-                    revista = _read_marcas_zip(raw_path, edition.numero)
-                except (zipfile.BadZipFile, ValueError):
-                    # Não deixa o arquivo ruim "resolvido" para a próxima rodada.
-                    raw_path.unlink(missing_ok=True)
-                    raise
-            if revista.parse_error:
-                # XML truncado: não grava um delta incompleto como PROCESSED.
-                # Remove o ZIP para que a próxima rodada tente baixar de novo
-                # (o download normal pularia um arquivo já existente).
-                raw_path.unlink(missing_ok=True)
-                raise ValueError(f"XML truncado/corrompido: {revista.parse_error}")
-            proc_numeros = [p.numero for p in revista.processos]
-            codigos = db.marcas_codigos_por_numero(proc_numeros)
-            rows = marcas_rows(revista.processos, codigos)
-            total_processos = len(revista.processos)
-            casados = len(
-                {p.numero for p in revista.processos if codigos.get(p.numero)}
+    def _parse_again():
+        """Lê o ZIP; se estiver corrompido, rebaixa uma vez antes de desistir."""
+        nonlocal raw_path
+        try:
+            return _read_for_section(section, raw_path, edition.numero)
+        except (zipfile.BadZipFile, ValueError):
+            logger.warning(
+                "RPI %s (%s): ZIP inválido em %s — baixando novamente.",
+                edition.numero,
+                section,
+                raw_path,
             )
-        else:
+            raw_path.unlink(missing_ok=True)
+            raw_path = download_edition(session, edition, force=True)
+            try:
+                return _read_for_section(section, raw_path, edition.numero)
+            except (zipfile.BadZipFile, ValueError):
+                # Não deixa o arquivo ruim "resolvido" para a próxima rodada.
+                raw_path.unlink(missing_ok=True)
+                raise
+
+    try:
+        revista = None
+        payloads: list[dict] = []
+        base_stats: dict[str, int] = {}
+        if section == "patentes":
             with zipfile.ZipFile(raw_path) as zf:
                 prefer = f"P{edition.numero}.txt"
                 with zf.open(_first_member(zf, ".txt", prefer=prefer)) as raw:
@@ -581,9 +783,46 @@ def process_edition(
             rows = patentes_rows(registros, digitos)
             total_processos = len(registros)
             casados = len(rows)
+        else:
+            revista = _parse_again()
+            if revista.parse_error:
+                # XML truncado: não grava um delta incompleto como PROCESSED.
+                # Remove o ZIP para que a próxima rodada tente baixar de novo
+                # (o download normal pularia um arquivo já existente).
+                raw_path.unlink(missing_ok=True)
+                raise ValueError(
+                    f"XML truncado/corrompido: {revista.parse_error}"
+                )
+            total_processos = len(revista.processos)
+            if section == "marcas":
+                codigos = db.marcas_codigos_por_numero(
+                    [p.numero for p in revista.processos]
+                )
+                rows = marcas_rows(revista.processos, codigos)
+                casados = len(
+                    {p.numero for p in revista.processos if codigos.get(p.numero)}
+                )
+            elif section == "desenho_industrial":
+                digitos = db.desenhos_digitos_map()
+                payloads, codigos = desenhos_payloads(
+                    revista.processos,
+                    digitos,
+                    data_rpi=revista.data or edition.data,
+                )
+                rows = desenhos_rows(revista.processos, digitos)
+                casados = len(payloads)
+            else:  # software
+                digitos = db.softwares_digitos_map()
+                payloads, codigos = softwares_payloads(
+                    revista.processos,
+                    digitos,
+                    data_rpi=revista.data or edition.data,
+                )
+                rows = softwares_rows(revista.processos, digitos)
+                casados = len(payloads)
     except Exception as exc:  # noqa: BLE001 - formato inesperado vira FAILED
         logger.exception(
-            "RPI %s (%s): falha ao processar o conteúdo", edition.numero, edition.section
+            "RPI %s (%s): falha ao processar o conteúdo", edition.numero, section
         )
         _save_state(
             edition,
@@ -594,26 +833,47 @@ def process_edition(
         )
         return {"status": FAILED, "erro": str(exc)}
 
+    # Atualiza os dados bibliográficos antes dos despachos: o upsert da base
+    # também leva a situação mais recente para a ficha do processo.
+    if section == "desenho_industrial":
+        base_stats = db.upsert_desenhos_rpi(payloads)
+    elif section == "software":
+        base_stats = db.upsert_softwares_rpi(payloads)
+
     inserted = _insert_in_chunks(
-        edition.section,
+        section,
         numero_rpi=edition.numero,
         data_rpi=edition.data,
         rows=rows,
     )
 
     imagens: dict[str, object] = {}
-    if edition.section == "marcas" and baixar_imagens and revista.processos:
+    if (
+        section in {"marcas", "desenho_industrial"}
+        and baixar_imagens
+        and revista is not None
+        and revista.processos
+    ):
         try:
-            imagens = download_for_edition(
-                numero_rpi=edition.numero,
-                processos=revista.processos,
-                codigos=codigos,
-                data_rpi=edition.data,
-                **(image_options or {}),
-            )
+            if section == "desenho_industrial":
+                imagens = download_for_desenho_edition(
+                    numero_rpi=edition.numero,
+                    processos=revista.processos,
+                    codigos=codigos,
+                    data_rpi=edition.data,
+                    **(image_options or {}),
+                )
+            else:
+                imagens = download_for_edition(
+                    numero_rpi=edition.numero,
+                    processos=revista.processos,
+                    codigos=codigos,
+                    data_rpi=edition.data,
+                    **(image_options or {}),
+                )
         except Exception as exc:  # noqa: BLE001 - imagens nunca invalidam o delta
             logger.exception(
-                "RPI %s (marcas): falha no pipeline de imagens", edition.numero
+                "RPI %s (%s): falha no pipeline de imagens", edition.numero, section
             )
             imagens = {"erro": str(exc)[:500]}
 
@@ -623,8 +883,10 @@ def process_edition(
         "casados": casados,
         "despachos": len(rows),
         "despachos_novos": inserted,
-        "arquivo": edition.nome_arquivo_escritorio,
+        "arquivo": raw_path.name,
     }
+    if base_stats:
+        stats["base"] = base_stats
     if imagens:
         stats["imagens"] = imagens
     _save_state(
@@ -633,7 +895,7 @@ def process_edition(
     logger.info(
         "RPI %s (%s): %d processo(s), %d casado(s), %d linha(s), %d nova(s).",
         edition.numero,
-        edition.section,
+        section,
         total_processos,
         casados,
         len(rows),
@@ -641,13 +903,25 @@ def process_edition(
     )
     if imagens:
         logger.info(
-            "RPI %s (marcas): imagens ok=%s sem_imagem=%s erro=%s.",
+            "RPI %s (%s): imagens ok=%s sem_imagem=%s erro=%s.",
             edition.numero,
+            section,
             imagens.get("OK", 0),
             imagens.get("SEM_IMAGEM", 0),
             imagens.get("ERROR", 0),
         )
     return stats
+
+
+def _read_for_section(section: str, path: Path, numero: str):
+    """Despacha a leitura do ZIP conforme a seção."""
+    if section == "marcas":
+        return _read_marcas_zip(path, numero)
+    if section == "desenho_industrial":
+        return _read_desenho_zip(path, numero)
+    if section == "software":
+        return _read_software_zip(path, numero)
+    raise ValueError(f"seção sem leitor de ZIP: {section}")
 
 
 def sync(
@@ -658,23 +932,61 @@ def sync(
     force: bool = False,
     baixar_imagens: bool = True,
     image_options: dict | None = None,
+    rpi_inicio: str | None = None,
+    rpi_fim: str | None = None,
 ) -> dict[str, dict]:
-    """Processa as ``ultimas`` edições de cada seção; devolve o resumo por edição."""
+    """Processa as ``ultimas`` edições de cada seção; devolve o resumo por edição.
+
+    Com ``rpi_inicio``/``rpi_fim`` (números de edição, inclusivos) faz backfill
+    do intervalo em ordem **crescente** — importante para que a situação
+    (``codigo_situacao``) termine no despacho mais recente. Nesse modo a janela
+    de descoberta é ampliada para localizar edições antigas.
+    """
     session = build_session()
     results: dict[str, dict] = {}
+    backfill = bool(rpi_inicio or rpi_fim)
+    janela = max(dias, 7300) if backfill else dias
+    inicio = int(rpi_inicio) if rpi_inicio else None
+    fim = int(rpi_fim) if rpi_fim else None
+
     for section in sections:
+        section = normalize_section(section)
         try:
-            editions = discover(session, section, dias=dias)
+            editions = discover(session, section, dias=janela)
         except requests.RequestException as exc:
             logger.error("Seção %s: falha na descoberta: %s", section, exc)
             results[f"{section}:?"] = {"status": FAILED, "erro": str(exc)}
             continue
+
+        if backfill:
+            selecionadas = []
+            for edition in editions:
+                try:
+                    numero = int(edition.numero)
+                except (TypeError, ValueError):
+                    continue
+                if inicio is not None and numero < inicio:
+                    continue
+                if fim is not None and numero > fim:
+                    continue
+                selecionadas.append(edition)
+            editions = sorted(selecionadas, key=lambda e: int(e.numero))
+        else:
+            editions = editions[: max(1, ultimas)]
+
         if not editions:
             logger.warning(
-                "Seção %s: nenhuma edição encontrada nos últimos %d dias.", section, dias
+                "Seção %s: nenhuma edição encontrada%s.",
+                section,
+                (
+                    f" no intervalo {rpi_inicio or '...'}–{rpi_fim or '...'}"
+                    if backfill
+                    else f" nos últimos {dias} dias"
+                ),
             )
             continue
-        for edition in editions[: max(1, ultimas)]:
+
+        for edition in editions:
             results[f"{section}:{edition.numero}"] = process_edition(
                 session,
                 edition,
@@ -687,20 +999,42 @@ def sync(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Atualiza os despachos de marcas e patentes a partir da RPI (semanal)."
+        description=(
+            "Atualiza os despachos da RPI (semanal) para marcas, patentes, "
+            "desenhos industriais e programas de computador."
+        )
     )
     parser.add_argument(
         "--secao",
         action="append",
         dest="sections",
-        choices=sorted(SECOES),
-        help="Seção a atualizar (marcas/patentes). Repetível. Padrão: as duas.",
+        type=normalize_section,
+        metavar="{marcas,patentes,desenho_industrial,software}",
+        help=(
+            "Seção a atualizar. Aceita aliases (di, desenhos, pc, "
+            "programa_computador). Repetível. Padrão: marcas e patentes."
+        ),
     )
     parser.add_argument(
         "--ultimas",
         type=int,
         default=1,
         help="Quantas edições recentes processar por seção (backfill). Padrão: 1.",
+    )
+    parser.add_argument(
+        "--rpi-inicio",
+        type=int,
+        metavar="NUMERO",
+        help=(
+            "Primeira edição do backfill (inclusive). Processa o intervalo em "
+            "ordem crescente; use junto com --rpi-fim."
+        ),
+    )
+    parser.add_argument(
+        "--rpi-fim",
+        type=int,
+        metavar="NUMERO",
+        help="Última edição do backfill (inclusive). Padrão: a mais recente.",
     )
     parser.add_argument(
         "--dias",
@@ -716,7 +1050,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sem-imagens",
         action="store_true",
-        help="Não baixa as imagens/logotipos referenciados pelo XML de Marcas.",
+        help=(
+            "Não baixa logotipos de Marcas nem figuras de Desenhos "
+            "Industriais referenciados pelo XML."
+        ),
     )
     parser.add_argument(
         "--imagens-concorrencia",
@@ -762,7 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.imagens_limite:
         image_options["limit"] = args.imagens_limite
 
-    sections = args.sections or list(SECOES)
+    sections = args.sections or ["marcas", "patentes"]
     results = sync(
         sections,
         ultimas=args.ultimas,
@@ -770,6 +1107,8 @@ def main(argv: list[str] | None = None) -> int:
         force=args.force,
         baixar_imagens=not args.sem_imagens,
         image_options=image_options or None,
+        rpi_inicio=args.rpi_inicio,
+        rpi_fim=args.rpi_fim,
     )
     for key in sorted(results):
         print(f"{key}  {results[key]}")

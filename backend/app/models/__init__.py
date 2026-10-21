@@ -140,6 +140,7 @@ from app.models.desenhos import (
     DesenhoFigura,
     DesenhoPrioridade,
     DesenhoProcurador,
+    DesenhoRpiFigura,
     DesenhoVinculo,
 )
 from app.models.software import (
@@ -249,6 +250,7 @@ __all__ = [
     "DesenhoDespacho",
     "DesenhoVinculo",
     "DesenhoFigura",
+    "DesenhoRpiFigura",
     # software (programa de computador)
     "Software",
     "SoftwareCampos",

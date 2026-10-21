@@ -150,18 +150,23 @@ services:
 
   # ---------------------------------------------------------------------------
   # Worker da RPI (Revista da Propriedade Industrial) — atualização SEMANAL de
-  # marcas e patentes.
+  # marcas, patentes, desenhos industriais e programas de computador.
   #
   # A RPI sai toda terça-feira e traz, por seção, os despachos daquela semana.
   # Os CSVs de dados abertos são snapshots: reprocessá-los toda semana custaria
   # ~11 GB de download + recarga total das tabelas. Este container faz só o DELTA:
-  # descobre a edição mais recente, baixa o ZIP em /txt/, parseia (XML de Marcas,
-  # TXT INID de Patentes) e grava os despachos novos em
-  # `marcas_despachos`/`patentes_despachos`, registrando o estado em `inpi_rpi`.
+  # descobre as edições recentes, baixa o ZIP em /txt/, parseia (XML de Marcas e
+  # Desenhos, TXT INID de Patentes, XML de Programas) e grava os despachos novos
+  # em `marcas_despachos`/`patentes_despachos`/`desenhos_despachos`/
+  # `softwares_despachos`, registrando o estado em `inpi_rpi`.
+  #
+  # Marcas e Desenhos também baixam as imagens referenciadas no XML (logotipos
+  # em `marcas_logos`, figuras em `desenhos_figuras`); as pendentes/falhas são
+  # retomadas no ciclo seguinte. Programas de computador só têm metadados.
   #
   # Idempotente em duas camadas: edição já PROCESSED é pulada (nada é baixado) e
-  # o INSERT ignora despachos já presentes. O laço é raro e barato — uma consulta
-  # de descoberta por seção a cada ciclo. Para pausar sem derrubar a stack:
+  # o INSERT ignora despachos já presentes. O laço é raro e barato. Para pausar
+  # sem derrubar a stack:
   # `docker compose -f docker-compose.prod.yml stop rpi`.
   # ---------------------------------------------------------------------------
   rpi:
@@ -191,7 +196,10 @@ services:
 
     command: >
       sh -c "while true; do
-               python -m ingestion.rpi --ultimas 2 --dias 21 || true;
+               python -m ingestion.rpi
+                 --secao marcas --secao patentes
+                 --secao desenho_industrial --secao software
+                 --ultimas 2 --dias 21 || true;
                sleep 21600;
              done"
 

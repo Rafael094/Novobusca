@@ -547,29 +547,58 @@ a recarga total das tabelas (inviável com o disco atual). Por isso o worker
 Ele roda em **container próprio** (serviço `rpi` do `docker-compose.prod.yml`,
 mesmo `.env`, mesmo PostgreSQL do host e o mesmo volume `api_data` da API).
 
-### O que ele faz (por seção: `marcas` e `patentes`)
+### O que ele faz (por seção)
 
-1. **descobre** a edição mais recente via JSON —
+Seções suportadas: `marcas` (XML), `patentes` (TXT INID), `desenho_industrial`
+(XML) e `software` (XML). Aceita os aliases `di`, `desenhos`,
+`programa_computador` e `pc` no `--secao`.
+
+1. **descobre** as edições recentes via JSON —
    `GET {base}/rpi/busca/data?revista.tipoRevista.id=<id>` (marcas = 5,
-   patentes = 6);
+   patentes = 6, desenhos = 3, programas = 7);
 2. **baixa** o ZIP de texto — `GET {base}/txt/<nomeArquivoEscritorio>` — e o
    guarda em `data/raw/rpi` (resume/auditoria; `raw_path`/`sha256` vão para
-   `inpi_rpi`);
-3. **parseia** o conteúdo: XML para **Marcas** (`<revista><processo>...`,
-   `<despacho codigo="IPAS###">`) e TXT INID para **Patentes** (`(Cd)`, `(21)`,
-   `(98)`, ...);
+   `inpi_rpi`). Marcas/Patentes trazem o nome do arquivo no JSON; Desenhos e
+   Programas não, então o worker deriva `DI<numero>.zip`/`PC<numero>.zip` e
+   valida a assinatura ZIP antes de parsear (o portal responde 200 com HTML de
+   erro quando o arquivo não existe);
+3. **parseia** o conteúdo: XML para **Marcas** e **Desenhos Industriais**, TXT
+   INID para **Patentes** e XML para **Programas de Computador**;
 4. **casa** o número do processo com o `codigo_interno` que já temos
-   (`marcas` por `numero_inpi`; `patentes` pelo conjunto de dígitos, já que o
-   formato do número varia). Processo que ainda não está no banco é **ignorado**
-   — ele entra pelo dump de dados abertos;
-5. **grava** os despachos novos em `marcas_despachos`/`patentes_despachos` e
-   registra o estado da edição em `inpi_rpi`
+   (`marcas` por `numero_inpi`; `patentes`/`desenhos`/`softwares` pelo conjunto
+   de dígitos, removendo o dígito verificador que só a RPI publica). Processo
+   que ainda não está no banco é **ignorado** — ele entra pelo dump de dados
+   abertos;
+5. **grava** os despachos novos em `marcas_despachos`/`patentes_despachos`/
+   `desenhos_despachos`/`softwares_despachos`, atualiza os dados bibliográficos
+   de DI/software (titulares, autores, procuradores, classificação Locarno,
+   prioridades, vínculos, linguagens, campos de aplicação) e registra o estado
+   da edição em `inpi_rpi`
    (`metadata.sections.<secao> = {status, processos, casados, despachos, ...}`).
 
-> **Escopo.** O worker **acrescenta** o histórico de publicações (despachos). Ele
-> **não** reescreve a situação/bibliografia da marca (`descricao_situacao` etc.):
-> o vocabulário de situação do dado aberto não é 1:1 com o código do despacho, e
-> um mapeamento errado corromperia o dado. Isso continua vindo do dump.
+> **Escopo.** Para Marcas/Patentes o worker só **acrescenta** o histórico de
+> publicações (despachos). Para Desenhos/Programas ele também atualiza a
+> situação e os campos bibliográficos, porque essas seções publicam os dados
+> completos do processo no XML. Campos já preenchidos pelo dump nunca são
+> apagados (`COALESCE`); a situação termina no despacho mais recente processado,
+> por isso o backfill roda em ordem crescente.
+
+### Imagens/logotipos de Marcas e figuras de Desenhos
+
+Depois de gravar os despachos, o worker baixa as imagens referenciadas no XML em
+paralelo (`httpx` + `asyncio`, concorrência limitada e retry/backoff):
+
+- **Marcas**: busca pública → acervo `/rpi/images/<edição>` → fallback histórico.
+  Metadado em `marcas_rpi_imagens`, espelhado em `marcas_logos`.
+- **Desenhos**: usa o acervo público de DI e o fallback `/rpi/images/<edição>`.
+  Metadado em `desenhos_rpi_figuras`, espelhado em `desenhos_figuras`. O XML de
+  DI nem sempre traz o nome da imagem; a referência é derivada do número do
+  processo.
+- **Programas de Computador** não têm imagens — só metadados bibliográficos.
+
+Os bytes são validados por *magic number* (JPEG/PNG/WebP); HTML, GIF de
+placeholder e respostas corrompidas são rejeitados. `OK`/`SEM_IMAGEM` são
+terminais e `ERROR` volta na próxima rodada, então o processo é retomável.
 
 ### Como ele roda
 
@@ -603,6 +632,38 @@ Duas camadas, então pode rodar quantas vezes quiser que nada duplica:
 O ZIP é salvo em `data/raw/rpi`; se o download cair no meio, o `.part` não é
 promovido e o próximo ciclo tenta de novo.
 
+### Migration / tabelas novas (Desenhos e Programas)
+
+O deploy da API roda `alembic upgrade head` antes do `uvicorn`: a revisão
+`b7c9d1e2f3a4` cria `desenhos_rpi_figuras` (procedência das figuras de DI) e a
+`f1a2b3c4d5e7` cria as tabelas base de Desenhos/Programas. Nada manual é
+necessário no caminho normal.
+
+Se o banco foi montado à mão com `database/06_desenhos_softwares.sql` (fora do
+Alembic), aplique o DDL idempotente e marque a revisão para o `upgrade head` não
+tentar recriar as tabelas:
+
+```bash
+cd /opt/intelliinpi
+
+# DDL manual (idempotente) — cria também `desenhos_rpi_figuras`
+docker exec -i inpi-postgres psql -U postgres -d intelliinpi_app \
+  -f - < database/06_desenhos_softwares.sql
+
+# marca a cabeça atual do Alembic
+docker compose -f docker-compose.prod.yml run --rm --no-deps api \
+  alembic stamp b7c9d1e2f3a4
+```
+
+Conferir as tabelas e a cabeça das migrations:
+
+```bash
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "\dt desenhos_rpi_figuras" -c "\dt softwares"
+docker compose -f docker-compose.prod.yml run --rm --no-deps api \
+  alembic current
+```
+
 ### Rodar à mão / inspecionar
 
 ```bash
@@ -612,13 +673,27 @@ cd /opt/intelliinpi
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --diagnostico
 
-# backfill das 4 últimas edições das duas seções
+# backfill das 4 últimas edições das quatro seções
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
-  python -m ingestion.rpi --ultimas 4
+  python -m ingestion.rpi --secao marcas --secao patentes \
+  --secao desenho_industrial --secao software --ultimas 4
 
 # uma seção só / reprocessar
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao marcas --force
+
+# backfill de um intervalo de edições (inclusivo, ordem crescente) — desenhos
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi --secao desenho_industrial \
+  --rpi-inicio 2500 --rpi-fim 2911
+
+# só os metadados, sem baixar imagens de marcas/desenhos
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi --secao desenho_industrial --sem-imagens
+
+# retomar imagens pendentes/falhas de Desenhos (ou de Marcas)
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi_images --secao desenho_industrial --pendentes --limite 500
 
 # o que já foi processado (o Postgres roda nativo na VM, no container inpi-postgres)
 docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
@@ -627,6 +702,10 @@ docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
 # quanto entrou de cada seção
 docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
   -c "SELECT numero_rpi, count(*) FROM marcas_despachos GROUP BY 1 ORDER BY 1 DESC LIMIT 5;"
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "SELECT numero_rpi, count(*) FROM desenhos_despachos GROUP BY 1 ORDER BY 1 DESC LIMIT 5;"
+docker exec inpi-postgres psql -U postgres -d intelliinpi_app \
+  -c "SELECT numero_rpi, count(*) FROM softwares_despachos GROUP BY 1 ORDER BY 1 DESC LIMIT 5;"
 ```
 
 > **Fonte instável.** O `revistas.inpi.gov.br` entra em manutenção de tempos em

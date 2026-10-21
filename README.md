@@ -262,27 +262,35 @@ lote em massa. Em produção isso roda sozinho, em container próprio (serviço
 `peticoes` do `docker-compose.prod.yml`) — ver
 `docs/DEPLOY_ORACLE_VERCEL.md` §5.2.
 
-### Atualização semanal — RPI (marcas e patentes)
+### Atualização semanal — RPI (marcas, patentes, desenhos e softwares)
 
 A **RPI** (Revista da Propriedade Industrial) sai toda **terça-feira** com os
 despachos da semana. O worker `ingestion.rpi` faz só o **delta semanal** (em vez
-de rebaixar ~11 GB de CSVs e recarregar as tabelas): descobre a edição mais
-recente no portal das Revistas, baixa o ZIP de texto (`/txt/`), parseia (XML para
-Marcas, TXT INID para Patentes), casa o processo com o `codigo_interno` que já
-temos e grava os despachos novos em `marcas_despachos`/`patentes_despachos`,
+de rebaixar ~11 GB de CSVs e recarregar as tabelas): descobre as edições recentes
+no portal das Revistas, baixa o ZIP de texto (`/txt/`), parseia (XML para Marcas
+e Desenhos Industriais, TXT INID para Patentes, XML para Programas de Computador),
+casa o processo com o `codigo_interno` que já temos e grava os despachos novos em
+`marcas_despachos`/`patentes_despachos`/`desenhos_despachos`/`softwares_despachos`,
 registrando o estado em `inpi_rpi`:
 
 ```powershell
 # (da raiz: intelliinpi) conectividade com o portal, sem tocar no banco
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --diagnostico
 
-# últimas edições de marcas + patentes
+# últimas edições de marcas + patentes (padrão)
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi
+
+# desenhos industriais e programas de computador (aceita aliases: di, pc)
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao software
 
 # backfill de 4 edições / uma seção só / reprocessar
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --ultimas 4
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao patentes
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao marcas --force
+
+# backfill de um intervalo de edições (inclusivo; roda em ordem crescente)
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2911
 ```
 
 Idempotente em duas camadas (edição `PROCESSED` é pulada; `INSERT` com
@@ -290,7 +298,7 @@ anti-join), então pode repetir à vontade. Em produção roda sozinho, em conta
 próprio (serviço `rpi` do `docker-compose.prod.yml`) — ver
 `docs/DEPLOY_ORACLE_VERCEL.md` §5.3.
 
-#### Imagens/logotipos das marcas da RPI
+#### Imagens/logotipos das marcas e figuras dos desenhos
 
 O XML de Marcas referencia a figura de cada processo em `<nome-imagem>`. Depois
 de gravar os despachos, o worker baixa essas imagens em paralelo (`httpx` +
@@ -300,13 +308,22 @@ de gravar os despachos, o worker baixa essas imagens em paralelo (`httpx` +
 2. acervo da edição — `https://revistas.inpi.gov.br/rpi/images/<RPI>/<arquivo>`;
 3. fallback histórico — `.../marca/imagem/<3 primeiros dígitos>/<processo>.jpg`.
 
+As figuras de **Desenhos Industriais** seguem o mesmo pipeline (seção
+`desenho_industrial`), usando o endpoint público de DI e o acervo
+`/rpi/images/<RPI>`; como o XML de DI nem sempre traz o nome do arquivo, a
+referência é derivada do número do processo. O metadado fica em
+`desenhos_rpi_figuras` e é espelhado em `desenhos_figuras`. **Programas de
+Computador** não têm imagens, só metadados bibliográficos.
+
 Os bytes são validados por *magic number* (JPEG/PNG/WebP); HTML, GIF de
 placeholder e respostas corrompidas são rejeitados. O arquivo vai para o mesmo
-layout dos logotipos (`data/raw/marcas/logos/<2 primeiros caracteres>/<código>.jpg`)
-e a procedência (edição, processo, `nome-imagem`, URL de origem, sha256) fica em
-`marcas_rpi_imagens`; quando o `codigo_interno` já é conhecido, `marcas_logos`
-também é atualizado para a API servir na hora. `OK`/`SEM_IMAGEM` são terminais e
-`ERROR` volta na próxima rodada, então o processo é retomável.
+layout dos logotipos (`data/raw/marcas/logos/<2 primeiros caracteres>/<código>.jpg`
+ou `data/raw/desenhos/figuras/<...>`) e a procedência (edição, processo,
+`nome-imagem`, URL de origem, sha256) fica em `marcas_rpi_imagens`/
+`desenhos_rpi_figuras`; quando o `codigo_interno` já é conhecido,
+`marcas_logos`/`desenhos_figuras` também são atualizados para a API servir na
+hora. `OK`/`SEM_IMAGEM` são terminais e `ERROR` volta na próxima rodada, então o
+processo é retomável.
 
 ```powershell
 # o worker semanal já baixa as imagens; use --sem-imagens para desligar
@@ -315,6 +332,7 @@ também é atualizado para a API servir na hora. `OK`/`SEM_IMAGEM` são terminai
 # backfill/retomada de uma edição ou de todas as pendentes
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --rpi 2910
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --pendentes --limite 500
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --secao desenho_industrial --pendentes --limite 500
 
 # testar um processo específico e diagnosticar os hosts (não toca no banco)
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi_images --rpi 2910 --processo 912345678
@@ -323,8 +341,8 @@ também é atualizado para a API servir na hora. `OK`/`SEM_IMAGEM` são terminai
 
 Principais variáveis: `INPI_RPI_IMAGE_CONCURRENCY` (padrão 6),
 `INPI_RPI_IMAGE_DELAY` (0.05 s), `INPI_RPI_IMAGE_RETRIES` (3),
-`INPI_RPI_IMAGE_TIMEOUT` (30 s), `INPI_RPI_IMAGE_MAX_BYTES` (15 MiB) e
-`INPI_BUSCA_IMAGES_BASE_URL`.
+`INPI_RPI_IMAGE_TIMEOUT` (30 s), `INPI_RPI_IMAGE_MAX_BYTES` (15 MiB),
+`INPI_BUSCA_IMAGES_BASE_URL` e `INPI_DESENHO_IMAGES_BASE_URL`.
 
 Relatório final: `reports/INPI_IMPORT_REPORT.md`
 
