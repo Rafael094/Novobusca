@@ -835,17 +835,30 @@ def process_edition(
 
     # Atualiza os dados bibliográficos antes dos despachos: o upsert da base
     # também leva a situação mais recente para a ficha do processo.
-    if section == "desenho_industrial":
-        base_stats = db.upsert_desenhos_rpi(payloads)
-    elif section == "software":
-        base_stats = db.upsert_softwares_rpi(payloads)
+    try:
+        if section == "desenho_industrial":
+            base_stats = db.upsert_desenhos_rpi(payloads)
+        elif section == "software":
+            base_stats = db.upsert_softwares_rpi(payloads)
 
-    inserted = _insert_in_chunks(
-        section,
-        numero_rpi=edition.numero,
-        data_rpi=edition.data,
-        rows=rows,
-    )
+        inserted = _insert_in_chunks(
+            section,
+            numero_rpi=edition.numero,
+            data_rpi=edition.data,
+            rows=rows,
+        )
+    except Exception as exc:  # noqa: BLE001 - uma edição ruim não para o backfill
+        logger.exception(
+            "RPI %s (%s): falha ao gravar no banco", edition.numero, section
+        )
+        _save_state(
+            edition,
+            status=FAILED,
+            state={"status": FAILED, "erro": f"db: {exc}"[:500]},
+            raw_path=raw_path,
+            row_status="FAILED",
+        )
+        return {"status": FAILED, "erro": str(exc)}
 
     imagens: dict[str, object] = {}
     if (
