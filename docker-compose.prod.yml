@@ -134,13 +134,14 @@ services:
       # arquivo e a tela cairia no placeholder.
       - api_data:/app/data
 
-    command: >
-      sh -c "while true; do
-               python -m ingestion.peticoes
-                 --apresentacao Mista --apresentacao Figurativa
-                 --limite 2000 --concorrencia 2 --delay 0.25 || true;
-               sleep 300;
-             done"
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          python -m ingestion.peticoes --apresentacao Mista --apresentacao Figurativa --limite 2000 --concorrencia 2 --delay 0.25 || true
+          sleep 300
+        done
 
     logging:
       driver: json-file
@@ -194,14 +195,14 @@ services:
       # auditados/retomados (raw_path/sha256 são registrados em inpi_rpi).
       - api_data:/app/data
 
-    command: >
-      sh -c "while true; do
-               python -m ingestion.rpi
-                 --secao marcas --secao patentes
-                 --secao desenho_industrial --secao software
-                 --ultimas 2 --dias 21 || true;
-               sleep 21600;
-             done"
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          python -m ingestion.rpi --secao marcas --secao patentes --secao desenho_industrial --secao software --ultimas 2 --dias 21 || true
+          sleep 21600
+        done
 
     logging:
       driver: json-file
