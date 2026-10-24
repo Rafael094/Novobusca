@@ -110,13 +110,17 @@ if [ "${BAIXAR_IMAGENS:-0}" = "1" ]; then
   done
 
   echo "== Retomando figuras pendentes =="
+  pend_args=(--secao desenho_industrial --pendentes)
   if [ -n "${LIMITE_PENDENTES:-}" ]; then
-    run_rpi python -m ingestion.rpi_images \
-      --secao desenho_industrial --pendentes --limite "$LIMITE_PENDENTES" || true
-  else
-    run_rpi python -m ingestion.rpi_images \
-      --secao desenho_industrial --pendentes || true
+    pend_args+=(--limite "$LIMITE_PENDENTES")
   fi
+  if [ -n "${CONCORRENCIA:-}" ]; then
+    pend_args+=(--concorrencia "$CONCORRENCIA")
+  fi
+  if [ -n "${DELAY:-}" ]; then
+    pend_args+=(--delay "$DELAY")
+  fi
+  run_rpi python -m ingestion.rpi_images "${pend_args[@]}" || true
 fi
 
 echo "== Resumo =="
