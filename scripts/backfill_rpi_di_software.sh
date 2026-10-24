@@ -55,7 +55,8 @@ run_rpi() {
 }
 
 echo "== Smoke test: software 2911 =="
-run_rpi python -m ingestion.rpi --secao software --ultimas 1 --force
+run_rpi python -m ingestion.rpi \
+  --secao software --rpi-inicio 2911 --rpi-fim 2911 --force
 
 status="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'software'->>'status','') FROM inpi_rpi WHERE number='2911';" | tr -d '[:space:]')"
 casados="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'software'->>'casados','0') FROM inpi_rpi WHERE number='2911';" | tr -d '[:space:]')"
