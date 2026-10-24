@@ -745,9 +745,14 @@ docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
 # FAILED com "assinatura b'<!DO'" porque o portal devolve HTML de erro com 200.
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao desenho_industrial \
-  --rpi-inicio 2500 --rpi-fim 2754
+  --rpi-inicio 2500 --rpi-fim 2754 --sem-imagens
 
-# só os metadados, sem baixar imagens de marcas/desenhos
+# depois, baixe as figuras por edição (o acervo histórico é grande; comece
+# pelas edições mais recentes e use --limite para controlar o volume)
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.rpi_images --secao desenho_industrial --rpi 2754 --limite 200
+
+# só os metadados, sem baixar imagens de marcas/desenhos (para uma edição)
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao desenho_industrial --sem-imagens
 

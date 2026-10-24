@@ -290,7 +290,8 @@ registrando o estado em `inpi_rpi`:
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao marcas --force
 
 # backfill de um intervalo de edições (inclusivo; roda em ordem crescente)
-.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2754
+# --sem-imagens: primeiro os metadados; as figuras podem ser baixadas depois
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2754 --sem-imagens
 ```
 
 > **Desenhos Industriais — limite do TXT.** O portal publica o ZIP de texto
