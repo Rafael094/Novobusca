@@ -368,6 +368,61 @@ Se rodar num banco já cheio e o índice pesado (GIN trigram, que serve o filtro
 `INDEX_BUILD_TIMEOUT_SECONDS` no `.env` (ver `backend/.env.prod.example`) e
 construa o índice fora do horário do deploy com `--timeout 0`.
 
+### Carga base de Desenhos Industriais e Programas de Computador
+
+A RPI é **delta**: ela só casa processos que já existem em `desenhos`/`softwares`
+(tabelas carregadas pelos CSVs de dados abertos). Sem essa carga, o worker
+registra `0 casado(s)`, exatamente como aconteceu em 2910/2911.
+
+Rode a carga pelo container **`rpi`** (a imagem `api` não contém o pacote
+`ingestion`), e use `--dataset` em vez de `--category`: a categoria de Desenhos
+inclui os bundles `DI_FIGURAS_*.ZIP` (dezenas de GB), que não devem ser baixados
+para a carga tabular.
+
+```bash
+cd /opt/intelliinpi
+docker compose -f docker-compose.prod.yml stop rpi
+
+# Desenhos Industriais: 9 CSVs (~630 MB)
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.import_all \
+  --dataset di_dados_bibliograficos \
+  --dataset di_conteudo \
+  --dataset di_depositantes \
+  --dataset di_autores \
+  --dataset di_procuradores \
+  --dataset di_classificacoes \
+  --dataset di_prioridades \
+  --dataset di_despachos \
+  --dataset di_vinculos
+
+# Programas de Computador: 7 CSVs (~120 MB)
+docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
+  python -m ingestion.import_all \
+  --dataset prog_comp_dados_basicos \
+  --dataset prog_comp_titular \
+  --dataset prog_comp_autores \
+  --dataset prog_comp_linguagem \
+  --dataset prog_comp_tipo \
+  --dataset prog_comp_campos \
+  --dataset prog_comp_despachos
+```
+
+O carregador aplica aliases de coluna (ex.: `titulo_programa` → `titulo`,
+`nome_titular` → `nome`, `numero_despacho` → `codigo_despacho`) e, ao carregar
+`di_conteudo`, copia o título para `desenhos.titulo` (a busca de Desenhos usa
+essa coluna). Confira:
+
+```sql
+SELECT count(*) FROM desenhos;             -- ~208 mil
+SELECT count(*) FROM softwares;            -- ~78 mil
+SELECT count(*) FROM desenhos_depositantes;
+SELECT count(*) FROM softwares_titulares;
+```
+
+Depois disso, reprocesse as edições de software já marcadas como `PROCESSED`
+com `--force` e faça o backfill de Desenhos até a edição 2754 (limite do TXT).
+
 ### Validar que o planner está usando os índices
 
 ```sql

@@ -27,12 +27,83 @@ from ingestion.util import get_logger
 
 logger = get_logger(__name__)
 
+# Alguns CSVs oficiais usam nomes de coluna diferentes dos modelos ORM. O
+# carregador casa os nomes de forma normalizada (sem acento/maiúsculas), então
+# sem este mapa campos importantes (nome do titular, título do programa, código
+# do despacho etc.) seriam silenciosamente descartados.
+# Chave: ``DatasetSpec.name``; valor: coluna normalizada do CSV -> coluna
+# normalizada da tabela. Só os datasets cujos nomes divergem precisam constar.
+COLUMN_ALIASES: dict[str, dict[str, str]] = {
+    # Desenhos Industriais
+    "di_depositantes": {
+        "depositante": "nome",
+        "cgccpfdepositante": "cpf_cnpj",
+        "tipopessoadepositante": "tipo_pessoa",
+    },
+    "di_procuradores": {
+        "cgccpfprocurador": "cpf_cnpj",
+        "tipopessoaprocurador": "tipo_pessoa",
+    },
+    "di_classificacoes": {
+        # O CSV traz o símbolo Locarno (ex.: "19-08.P 0159") em ``simbolo`` e a
+        # descrição textual em ``classificacao``.
+        "simbolo": "classificacao_locarno",
+        "classificacao": "descricao_locarno",
+    },
+    # Programas de Computador
+    "prog_comp_dados_basicos": {
+        "titulo_programa": "titulo",
+    },
+    "prog_comp_titular": {
+        "nome_titular": "nome",
+        "cnpj_cpf_titular": "cpf_cnpj",
+    },
+    "prog_comp_autores": {
+        "nome_autor": "autor",
+    },
+    "prog_comp_tipo": {
+        "codigo_tipo": "tipo",
+        "descricao_tipo": "campo_aplicacao",
+    },
+    "prog_comp_campos": {
+        "codigo_campo": "campo",
+        "descricao_campo": "valor",
+    },
+    "prog_comp_despachos": {
+        "numero_despacho": "codigo_despacho",
+    },
+}
+
 
 def _normalize(name: str) -> str:
     """Lower-case and strip accents so 'Número_INPI' matches 'numero_inpi'."""
     decomposed = unicodedata.normalize("NFKD", name)
     ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
     return ascii_only.strip().lower().replace(" ", "_")
+
+
+def _match_columns(
+    csv_cols: list[str],
+    table_cols: dict[str, str],
+    aliases: dict[str, str],
+) -> list[tuple[str, str]]:
+    """Casa colunas do CSV com as da tabela, aplicando aliases do dataset.
+
+    Retorna pares ``(coluna_csv, coluna_tabela)`` na ordem do CSV. Uma coluna de
+    destino só pode ser usada uma vez, para não gerar ``INSERT`` com a mesma
+    coluna duas vezes quando o CSV tiver nomes redundantes.
+    """
+    mapped: list[tuple[str, str]] = []
+    used: set[str] = set()
+    for csv_col in csv_cols:
+        normalized = _normalize(csv_col)
+        target = aliases.get(normalized, normalized)
+        table_col = table_cols.get(target)
+        if not table_col or table_col in used:
+            continue
+        used.add(table_col)
+        mapped.append((csv_col, table_col))
+    return mapped
 
 
 def _table_columns(con: duckdb.DuckDBPyConnection, table: str) -> dict[str, str]:
@@ -97,6 +168,43 @@ def _dataset_id(name: str) -> str:
         return str(row[0]) if row else ""
 
 
+def _post_load(spec: DatasetSpec) -> None:
+    """Enriquecimentos que dependem de outro CSV já carregado.
+
+    ``desenhos.titulo`` não existe em ``DI_DADOS_BIBLIOGRAFICOS.csv``; o título
+    vem de ``DI_CONTEUDO.csv``. A busca de Desenhos usa ``Desenho.titulo``, então
+    copiamos o valor depois que o conteúdo é carregado. É idempotente e nunca
+    sobrescreve um título já preenchido pela RPI.
+    """
+    if spec.name == "di_conteudo":
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE desenhos AS d
+                   SET titulo = c.titulo,
+                       updated_at = now()
+                  FROM desenhos_conteudo AS c
+                 WHERE c.codigo_interno = d.codigo_interno
+                   AND c.titulo IS NOT NULL
+                   AND c.titulo <> ''
+                   AND (d.titulo IS NULL OR d.titulo = '')
+                """
+            )
+            if cur.rowcount:
+                logger.info("Títulos de DI sincronizados: %d", cur.rowcount)
+    elif spec.name == "di_classificacoes":
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE desenhos_classificacoes
+                   SET classificacao_locarno = btrim(classificacao_locarno),
+                       descricao_locarno = btrim(descricao_locarno)
+                 WHERE classificacao_locarno IS NOT NULL
+                    OR descricao_locarno IS NOT NULL
+                """
+            )
+
+
 def load_dataset(
     spec: DatasetSpec,
     *,
@@ -130,19 +238,22 @@ def load_dataset(
 
         for csv_path in csv_files:
             csv_cols = _csv_columns(con, csv_path)
-            matched = [c for c in csv_cols if _normalize(c) in table_cols]
-            if not matched:
+            mapped = _match_columns(
+                csv_cols, table_cols, COLUMN_ALIASES.get(spec.name, {})
+            )
+            if not mapped:
                 raise RuntimeError(
                     f"No matching columns between {csv_path.name} and {table}"
                 )
+            matched = [source for source, _ in mapped]
             # Project matched CSV columns -> table columns, prefixing a fresh
             # UUID for the primary key (the model uses a Python-side uuid4
             # default with no server default, so raw inserts must supply it).
             select_parts = ['gen_random_uuid() AS "id"']
             target_parts = ['"id"']
-            for c in matched:
-                select_parts.append(f'"{c}" AS "{table_cols[_normalize(c)]}"')
-                target_parts.append(f'"{table_cols[_normalize(c)]}"')
+            for source, target in mapped:
+                select_parts.append(f'"{source}" AS "{target}"')
+                target_parts.append(f'"{target}"')
             select_list = ", ".join(select_parts)
             target_cols = ", ".join(target_parts)
             path_sql = csv_path.as_posix()
@@ -152,15 +263,14 @@ def load_dataset(
             # same natural key). When a single-column UNIQUE constraint exists,
             # keep one row per key; otherwise fall back to DISTINCT over all
             # projected data columns.
-            if unique_cols:
-                key = unique_cols[0]
-                key_col = matched[
-                    next(
-                        i
-                        for i, c in enumerate(matched)
-                        if _normalize(c) == _normalize(key)
-                    )
-                ]
+            key_target = (
+                table_cols.get(_normalize(unique_cols[0])) if unique_cols else None
+            )
+            key_col = next(
+                (source for source, target in mapped if target == key_target),
+                None,
+            )
+            if key_col:
                 source = (
                     f"(SELECT {select_list} FROM read_csv('{path_sql}', header=true, "
                     f"sample_size=-1, ignore_errors=true) "
@@ -174,7 +284,9 @@ def load_dataset(
                     f"sample_size=-1, ignore_errors=true)))"
                 )
 
-            logger.info("Loading %s -> %s (%d cols)", csv_path.name, table, len(matched))
+            logger.info(
+                "Loading %s -> %s (%d cols)", csv_path.name, table, len(mapped)
+            )
             rows_read = con.execute(f"SELECT count(*) FROM read_csv('{path_sql}', header=true, sample_size=-1, ignore_errors=true)").fetchone()[0]
             con.execute(
                 f'INSERT INTO pg."{table}" ({target_cols}) SELECT * FROM {source}'
@@ -197,6 +309,8 @@ def load_dataset(
         con.execute("DETACH pg;")
     finally:
         con.close()
+
+    _post_load(spec)
 
     duration = time.monotonic() - started
     logger.info(
