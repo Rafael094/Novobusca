@@ -70,14 +70,14 @@ echo "== Backfill de software: 2500–2911 =="
 run_rpi python -m ingestion.rpi \
   --secao software --rpi-inicio 2500 --rpi-fim 2911 --force
 
-echo "== Smoke test: DI 2754 =="
+echo "== Smoke test: DI 2500 =="
 run_rpi python -m ingestion.rpi \
-  --secao desenho_industrial --rpi-inicio 2754 --rpi-fim 2754 \
+  --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2500 \
   --sem-imagens --force
 
-status_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'status','') FROM inpi_rpi WHERE number='2754';" | tr -d '[:space:]')"
-casados_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'casados','0') FROM inpi_rpi WHERE number='2754';" | tr -d '[:space:]')"
-echo "DI 2754: status=$status_di casados=$casados_di"
+status_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'status','') FROM inpi_rpi WHERE number='2500';" | tr -d '[:space:]')"
+casados_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'casados','0') FROM inpi_rpi WHERE number='2500';" | tr -d '[:space:]')"
+echo "DI 2500: status=$status_di casados=$casados_di"
 if [ "$status_di" != "PROCESSED" ] || [ "${casados_di:-0}" -le 0 ]; then
   echo "ERRO: o smoke test de DI falhou; abortando antes do backfill longo." >&2
   exit 1
