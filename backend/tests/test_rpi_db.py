@@ -384,3 +384,38 @@ def test_process_edition_sem_arquivo_marca_failed(db, rpi_tmp) -> None:
     stats = ing_rpi.process_edition(requests.Session(), edition)
     assert stats["status"] == "FAILED"
     assert ing_db.get_rpi("2999")["status"] == "FAILED"
+
+def test_insert_missing_cast_explicito_evita_ambiguous_parameter() -> None:
+    """O mesmo parâmetro no INSERT e no anti-join precisa de um tipo único."""
+
+    class _FakeCursor:
+        rowcount = 1
+
+        def execute(self, sql: str, params: dict) -> None:
+            self.sql = sql
+            self.params = params
+
+    cur = _FakeCursor()
+    inserted = ing_db._insert_missing(
+        cur,
+        "softwares_titulares",
+        {
+            "id": "00000000-0000-0000-0000-000000000000",
+            "codigo_interno": "50001",
+            "numero_inpi": "512025002476",
+            "ordem": "1",
+            "nome": "ACME",
+            "cpf_cnpj": "123",
+            "tipo_pessoa": "J",
+            "pais": "BR",
+            "estado": "SP",
+        },
+        ("codigo_interno", "nome"),
+        case_insensitive=("nome",),
+    )
+
+    assert inserted == 1
+    assert "%(v0)s::uuid" in cur.sql
+    assert "%(v1)s::text" in cur.sql
+    assert "codigo_interno::text" in cur.sql
+    assert "upper(trim(coalesce(nome::text, '')))" in cur.sql

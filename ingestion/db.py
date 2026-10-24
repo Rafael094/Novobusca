@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import psycopg
@@ -572,6 +572,21 @@ def insert_softwares_despachos(
     )
 
 
+def _parameter_cast(column: str, value: Any) -> str:
+    """Tipo SQL explícito para o parâmetro.
+
+    O mesmo parâmetro aparece no ``SELECT`` do ``INSERT`` e no anti-join. Sem o
+    cast, o PostgreSQL pode deduzir tipos diferentes para ele (ex.: ``text`` no
+    anti-join e ``character varying`` na coluna de destino), resultando em
+    ``AmbiguousParameter``. O cast fixa um único tipo nos dois lugares.
+    """
+    if column == "id":
+        return "uuid"
+    if column.startswith("data_") or isinstance(value, date):
+        return "date"
+    return "text"
+
+
 def _insert_missing(
     cur: psycopg.Cursor,
     table: str,
@@ -588,7 +603,10 @@ def _insert_missing(
     """
     columns = list(values)
     params = {f"v{i}": values[col] for i, col in enumerate(columns)}
-    select = ", ".join(f"%({name})s" for name in params)
+    select = ", ".join(
+        f"%({name})s::{_parameter_cast(col, values[col])}"
+        for name, col in zip(params, columns)
+    )
     conditions: list[str] = []
     for i, col in enumerate(columns):
         if col not in key_columns:
@@ -596,11 +614,13 @@ def _insert_missing(
         name = f"v{i}"
         if col in case_insensitive:
             conditions.append(
-                f"upper(trim(coalesce({col}, ''))) = "
-                f"upper(trim(coalesce(%({name})s, '')))"
+                f"upper(trim(coalesce({col}::text, ''))) = "
+                f"upper(trim(coalesce(%({name})s::text, '')))"
             )
         else:
-            conditions.append(f"{col} IS NOT DISTINCT FROM %({name})s")
+            conditions.append(
+                f"{col}::text IS NOT DISTINCT FROM %({name})s::text"
+            )
     if not conditions:
         raise ValueError(f"{table}: nenhuma coluna de chave informada")
     sql = (
