@@ -70,6 +70,19 @@ echo "== Backfill de software: 2500–2911 =="
 run_rpi python -m ingestion.rpi \
   --secao software --rpi-inicio 2500 --rpi-fim 2911 --force
 
+echo "== Smoke test: DI 2754 =="
+run_rpi python -m ingestion.rpi \
+  --secao desenho_industrial --rpi-inicio 2754 --rpi-fim 2754 \
+  --sem-imagens --force
+
+status_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'status','') FROM inpi_rpi WHERE number='2754';" | tr -d '[:space:]')"
+casados_di="$("${PSQL[@]}" "SELECT coalesce(metadata->'sections'->'desenho_industrial'->>'casados','0') FROM inpi_rpi WHERE number='2754';" | tr -d '[:space:]')"
+echo "DI 2754: status=$status_di casados=$casados_di"
+if [ "$status_di" != "PROCESSED" ] || [ "${casados_di:-0}" -le 0 ]; then
+  echo "ERRO: o smoke test de DI falhou; abortando antes do backfill longo." >&2
+  exit 1
+fi
+
 echo "== Backfill de metadados de DI: 2500–2754 (sem imagens) =="
 run_rpi python -m ingestion.rpi \
   --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2754 \
@@ -107,11 +120,11 @@ if [ "${BAIXAR_IMAGENS:-0}" = "1" ]; then
 fi
 
 echo "== Resumo =="
-"${PSQL[@]}" "SELECT 'desenhos=' || count(*) FROM desenhos;"
-"${PSQL[@]}" "SELECT 'softwares=' || count(*) FROM softwares;"
-"${PSQL[@]}" "SELECT 'desenhos_despachos=' || count(*) FROM desenhos_despachos;"
-"${PSQL[@]}" "SELECT 'softwares_despachos=' || count(*) FROM softwares_despachos;"
-"${PSQL[@]}" "SELECT 'figuras_rpi=' || count(*) FROM desenhos_rpi_figuras;"
+"${PSQL[@]}" "SELECT 'desenhos=' || count(*) FROM desenhos;" || true
+"${PSQL[@]}" "SELECT 'softwares=' || count(*) FROM softwares;" || true
+"${PSQL[@]}" "SELECT 'desenhos_despachos=' || count(*) FROM desenhos_despachos;" || true
+"${PSQL[@]}" "SELECT 'softwares_despachos=' || count(*) FROM softwares_despachos;" || true
+"${PSQL[@]}" "SELECT 'figuras_rpi=' || count(*) FROM desenhos_rpi_figuras;" || true
 
 echo "== Religando o worker =="
 "${COMPOSE[@]}" up -d --no-deps rpi
