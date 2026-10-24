@@ -415,7 +415,8 @@ essa coluna). Confira:
 
 ```sql
 SELECT count(*) FROM desenhos;             -- ~208 mil
-SELECT count(*) FROM softwares;            -- ~78 mil
+SELECT count(*) FROM softwares;            -- ~64 mil (o CSV tem ~78 mil linhas;
+                                           -- o loader deduplica por codigo_interno)
 SELECT count(*) FROM desenhos_depositantes;
 SELECT count(*) FROM softwares_titulares;
 ```
