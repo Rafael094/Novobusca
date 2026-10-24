@@ -673,19 +673,23 @@ cd /opt/intelliinpi
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --diagnostico
 
-# backfill das 4 últimas edições das quatro seções
+# backfill das 4 últimas edições de marcas/patentes/software
+# (Desenhos Industriais: use o intervalo 2500–2754, ver abaixo)
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao marcas --secao patentes \
-  --secao desenho_industrial --secao software --ultimas 4
+  --secao software --ultimas 4
 
 # uma seção só / reprocessar
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao marcas --force
 
 # backfill de um intervalo de edições (inclusivo, ordem crescente) — desenhos
+# ATENÇÃO: o portal só tem ZIP de texto (DI<numero>.zip) até a edição 2754.
+# Da 2755 em diante a seção de Desenhos publica apenas PDF; o worker registra
+# FAILED com "assinatura b'<!DO'" porque o portal devolve HTML de erro com 200.
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \
   python -m ingestion.rpi --secao desenho_industrial \
-  --rpi-inicio 2500 --rpi-fim 2911
+  --rpi-inicio 2500 --rpi-fim 2754
 
 # só os metadados, sem baixar imagens de marcas/desenhos
 docker compose -f docker-compose.prod.yml run --rm --no-deps rpi \

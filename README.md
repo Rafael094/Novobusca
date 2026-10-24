@@ -290,8 +290,15 @@ registrando o estado em `inpi_rpi`:
 .\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao marcas --force
 
 # backfill de um intervalo de edições (inclusivo; roda em ordem crescente)
-.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2911
+.\backend\.venv\Scripts\python.exe -m ingestion.rpi --secao desenho_industrial --rpi-inicio 2500 --rpi-fim 2754
 ```
+
+> **Desenhos Industriais — limite do TXT.** O portal publica o ZIP de texto
+> (`DI<numero>.zip`) até a edição **2754**. Da **2755** em diante a seção de
+> Desenhos só tem PDF, então essas edições ficam `FAILED` com a mensagem
+> `assinatura b'<!DO'` (o portal devolve a página de erro com HTTP 200). Isso é
+> uma limitação da fonte, não do worker. Para Desenhos, use `--rpi-fim 2754`;
+> Programas de Computador (`PC<numero>.zip`) continuam disponíveis em TXT.
 
 Idempotente em duas camadas (edição `PROCESSED` é pulada; `INSERT` com
 anti-join), então pode repetir à vontade. Em produção roda sozinho, em container
