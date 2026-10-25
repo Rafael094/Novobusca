@@ -7,15 +7,14 @@
 #
 # Uso:
 #   ./scripts/backfill_rpi_di_software.sh
-#   BAIXAR_IMAGENS=1 ./scripts/backfill_rpi_di_software.sh
 #
-# Variáveis opcionais para as figuras:
-#   DI_IMG_INICIO=2500 DI_IMG_FIM=2754
-#   LIMITE_POR_EDICAO=500 CONCORRENCIA=4 DELAY=0.25
-#   LIMITE_PENDENTES=2000
+# As figuras de DI NÃO vêm do XML semanal da RPI: o XML só traz
+# <complemento-figura-rosto/> e o INPI não serve as imagens individuais.
+# Para figuras, use os bundles oficiais DI_FIGURAS_*.ZIP com
+# `python -m ingestion.figuras`.
 #
 # O script para o worker `rpi` durante a carga e o religa no final. Se for
-# interrompido, os ZIPs e as linhas de imagem já gravadas são reaproveitados.
+# interrompido, os ZIPs e os metadados já gravados são reaproveitados.
 
 set -euo pipefail
 
@@ -89,38 +88,12 @@ run_rpi python -m ingestion.rpi \
   --sem-imagens --force
 
 if [ "${BAIXAR_IMAGENS:-0}" = "1" ]; then
-  echo "== Figuras de DI: ${DI_IMG_FIM:-2754} até ${DI_IMG_INICIO:-2500} =="
-  echo "Isso pode levar horas e consumir vários GB; é resumível."
-  for n in $(seq "${DI_IMG_FIM:-2754}" -1 "${DI_IMG_INICIO:-2500}"); do
-    echo "--- DI $n ---"
-    args=(--secao desenho_industrial --rpi "$n")
-    if [ -n "${LIMITE_POR_EDICAO:-}" ]; then
-      args+=(--limite "$LIMITE_POR_EDICAO")
-    fi
-    if [ -n "${CONCORRENCIA:-}" ]; then
-      args+=(--concorrencia "$CONCORRENCIA")
-    fi
-    if [ -n "${DELAY:-}" ]; then
-      args+=(--delay "$DELAY")
-    fi
-
-    if ! run_rpi python -m ingestion.rpi_images "${args[@]}"; then
-      echo "AVISO: falha nas figuras de DI $n; continuando." >&2
-    fi
-  done
-
-  echo "== Retomando figuras pendentes =="
-  pend_args=(--secao desenho_industrial --pendentes)
-  if [ -n "${LIMITE_PENDENTES:-}" ]; then
-    pend_args+=(--limite "$LIMITE_PENDENTES")
-  fi
-  if [ -n "${CONCORRENCIA:-}" ]; then
-    pend_args+=(--concorrencia "$CONCORRENCIA")
-  fi
-  if [ -n "${DELAY:-}" ]; then
-    pend_args+=(--delay "$DELAY")
-  fi
-  run_rpi python -m ingestion.rpi_images "${pend_args[@]}" || true
+  echo "AVISO: figuras de DI NÃO são servidas pelo XML da RPI."
+  echo "O pipeline de RPI não encontra as imagens (os endpoints retornam 404)."
+  echo "Use os bundles oficiais DI_FIGURAS_*.ZIP com:"
+  echo "  python -m ingestion.figuras --dry-run"
+  echo "  python -m ingestion.figuras"
+  echo "Ignorando BAIXAR_IMAGENS=1 nesta execução."
 fi
 
 echo "== Resumo =="
