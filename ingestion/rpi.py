@@ -50,8 +50,6 @@ import requests
 from ingestion import db
 from ingestion.config import CONFIG
 from ingestion.rpi_images import (
-    SECTION_DESENHO,
-    download_for_desenho_edition,
     download_for_edition,
     run_pending,
 )
@@ -862,33 +860,35 @@ def process_edition(
 
     imagens: dict[str, object] = {}
     if (
-        section in {"marcas", "desenho_industrial"}
+        section == "marcas"
         and baixar_imagens
         and revista is not None
         and revista.processos
     ):
         try:
-            if section == "desenho_industrial":
-                imagens = download_for_desenho_edition(
-                    numero_rpi=edition.numero,
-                    processos=revista.processos,
-                    codigos=codigos,
-                    data_rpi=edition.data,
-                    **(image_options or {}),
-                )
-            else:
-                imagens = download_for_edition(
-                    numero_rpi=edition.numero,
-                    processos=revista.processos,
-                    codigos=codigos,
-                    data_rpi=edition.data,
-                    **(image_options or {}),
-                )
+            imagens = download_for_edition(
+                numero_rpi=edition.numero,
+                processos=revista.processos,
+                codigos=codigos,
+                data_rpi=edition.data,
+                **(image_options or {}),
+            )
         except Exception as exc:  # noqa: BLE001 - imagens nunca invalidam o delta
             logger.exception(
                 "RPI %s (%s): falha no pipeline de imagens", edition.numero, section
             )
             imagens = {"erro": str(exc)[:500]}
+    elif section == "desenho_industrial" and baixar_imagens:
+        # O XML de DI sinaliza a figura apenas com <complemento-figura-rosto/>,
+        # sem nome de arquivo, e o INPI não serve as figuras individuais nos
+        # endpoints usados pelo pipeline de RPI. As figuras oficiais estão nos
+        # bundles DI_FIGURAS_*.ZIP, processados por `ingestion.figuras`.
+        logger.info(
+            "RPI %s (desenho_industrial): figuras fora da RPI; "
+            "use `python -m ingestion.figuras` com os bundles DI_FIGURAS_*.ZIP.",
+            edition.numero,
+        )
+        imagens = {"ignorado": "use ingestion.figuras (bundles DI_FIGURAS)"}
 
     stats = {
         "status": PROCESSED,
