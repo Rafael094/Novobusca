@@ -698,10 +698,11 @@ def process_edition(
             section,
             state.get("despachos"),
         )
-        # Mesmo com a edição concluída, imagens que ficaram ERROR/PENDING numa
-        # rodada anterior precisam de nova tentativa (o laço do compose chama
-        # o worker de novo a cada 6 h; sem isso elas nunca seriam retomadas).
-        if section in {"marcas", "desenho_industrial"} and baixar_imagens:
+        # Mesmo com a edição concluída, logotipos de marcas que ficaram
+        # ERROR/PENDING numa rodada anterior precisam de nova tentativa (o laço
+        # do compose chama o worker de novo a cada 6 h). Figuras de DI usam os
+        # bundles oficiais (`ingestion.figuras`) e não entram aqui.
+        if section == "marcas" and baixar_imagens:
             try:
                 pendentes = run_pending(
                     numero_rpi=edition.numero,
